@@ -16,12 +16,12 @@
 # alpaca-trade-api
 # yfinance
 
-# TODO: Google services integration
-# gspread
-# google-auth
-# google-auth-oauthlib
-# google-auth-httplib2
-# google-api-python-client
+# Google services integration
+gspread==5.12.4
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+google-api-python-client==2.108.0
 
 # TODO: Data processing and validation
 # pydantic
