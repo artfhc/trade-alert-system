@@ -181,7 +181,7 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
         data = await request.json()
         
         logger.info("📧 Received Gmail Pub/Sub notification")
-        logger.debug(f"Pub/Sub data: {json.dumps(data, indent=2)}")
+        logger.info(f"Pub/Sub data: {json.dumps(data, indent=2)}")  # Changed to INFO to always see the data
         
         # Validate Pub/Sub message format
         if "message" not in data:

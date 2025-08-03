@@ -133,12 +133,24 @@ class GmailPubSubProvider(AlertProvider):
             # Extract Pub/Sub message
             pubsub_data = self._decode_pubsub_message(raw_data)
             
-            # Get Gmail message ID
-            message_id = pubsub_data.get('historyId')  # This might need adjustment based on actual Pub/Sub format
+            # Extract Gmail message ID from Pub/Sub notification
+            # Gmail Pub/Sub notifications contain historyId, but we need to extract the actual message ID
+            # from the Gmail API using the historyId
+            gmail_message_id = None
             
-            # For now, we'll use a placeholder since we need to understand the exact Pub/Sub format
-            # In a real implementation, you'd extract the message ID from the Pub/Sub notification
-            gmail_message_id = pubsub_data.get('messageId', 'unknown')
+            # Try different possible locations for message ID
+            if 'messageId' in pubsub_data:
+                gmail_message_id = pubsub_data['messageId']
+            elif 'historyId' in pubsub_data:
+                # We have a historyId - in a real implementation, we'd use this to get recent messages
+                history_id = pubsub_data['historyId']
+                self.logger.info(f"Received Gmail history ID: {history_id}")
+                # For now, we'll skip fetching the actual message and use the notification data
+                gmail_message_id = f"history_{history_id}"
+            else:
+                # Fallback - look in the raw Pub/Sub message
+                raw_message = raw_data.get('message', {})
+                gmail_message_id = raw_message.get('messageId', 'unknown')
             
             # Default metadata and content
             metadata = {
@@ -151,18 +163,33 @@ class GmailPubSubProvider(AlertProvider):
             content = f"Gmail Pub/Sub notification received. Message ID: {gmail_message_id}"
             
             # Try to fetch full email content from Gmail API if service is available
-            if self.gmail_service:
+            if self.gmail_service and gmail_message_id and gmail_message_id != 'unknown':
                 try:
-                    email_data = self._fetch_email_content(gmail_message_id)
-                    metadata = self.extract_metadata(email_data)
-                    timestamp = self._extract_timestamp(email_data)
-                    content = self._extract_email_body(email_data)
-                    content = self.sanitize_content(content)
+                    if gmail_message_id.startswith('history_'):
+                        # We have a history ID - get recent messages
+                        history_id = gmail_message_id.replace('history_', '')
+                        recent_message = self._get_recent_message_from_history(history_id)
+                        if recent_message:
+                            email_data = self._fetch_email_content(recent_message)
+                            metadata = self.extract_metadata(email_data)
+                            timestamp = self._extract_timestamp(email_data)
+                            content = self._extract_email_body(email_data)
+                            content = self.sanitize_content(content)
+                    else:
+                        # We have a direct message ID
+                        email_data = self._fetch_email_content(gmail_message_id)
+                        metadata = self.extract_metadata(email_data)
+                        timestamp = self._extract_timestamp(email_data)
+                        content = self._extract_email_body(email_data)
+                        content = self.sanitize_content(content)
                 except Exception as e:
                     self.logger.warning(f"Could not fetch email content for {gmail_message_id}: {e}")
                     # Keep default values
             else:
-                self.logger.warning("Gmail service not available - using basic Pub/Sub data only")
+                if not self.gmail_service:
+                    self.logger.warning("Gmail service not available - using basic Pub/Sub data only")
+                else:
+                    self.logger.warning(f"Invalid Gmail message ID: {gmail_message_id} - using basic Pub/Sub data only")
             
             # Validate sender if whitelist is configured
             if self.sender_whitelist:
@@ -208,18 +235,67 @@ class GmailPubSubProvider(AlertProvider):
             message = raw_data.get('message', {})
             data = message.get('data', '')
             
+            self.logger.debug(f"Raw Pub/Sub message: {json.dumps(raw_data, indent=2)}")
+            
             if data:
-                # Decode base64 data
-                decoded_data = base64.b64decode(data).decode('utf-8')
-                return json.loads(decoded_data)
+                try:
+                    # Decode base64 data
+                    decoded_data = base64.b64decode(data).decode('utf-8')
+                    parsed_data = json.loads(decoded_data)
+                    self.logger.debug(f"Decoded Pub/Sub data: {json.dumps(parsed_data, indent=2)}")
+                    return parsed_data
+                except Exception as decode_error:
+                    self.logger.warning(f"Could not decode base64 data: {decode_error}")
+                    # Return raw data if decoding fails
+                    return {'raw_data': data}
             else:
-                # Sometimes the data might be directly in attributes
-                return message.get('attributes', {})
+                # Sometimes the data might be directly in attributes or message itself
+                attributes = message.get('attributes', {})
+                self.logger.debug(f"Using Pub/Sub attributes: {json.dumps(attributes, indent=2)}")
+                return attributes
                 
         except Exception as e:
             self.logger.error(f"Error decoding Pub/Sub message: {e}")
-            raise ValueError(f"Invalid Pub/Sub message format: {e}")
+            # Return whatever we can extract instead of failing
+            return {
+                'error': str(e),
+                'raw_message': raw_data.get('message', {}),
+                'message_id': raw_data.get('message', {}).get('messageId', 'unknown')
+            }
     
+    def _get_recent_message_from_history(self, history_id: str) -> Optional[str]:
+        """Get the most recent message ID from Gmail history"""
+        try:
+            if not self.gmail_service:
+                return None
+            
+            # Get history starting from the given history ID
+            history = self.gmail_service.users().history().list(
+                userId='me',
+                startHistoryId=history_id,
+                maxResults=10  # Get recent messages
+            ).execute()
+            
+            messages = []
+            if 'history' in history:
+                for history_item in history['history']:
+                    if 'messagesAdded' in history_item:
+                        for message_added in history_item['messagesAdded']:
+                            messages.append(message_added['message']['id'])
+            
+            # Return the most recent message ID
+            if messages:
+                latest_message_id = messages[-1]  # Get the last (most recent) message
+                self.logger.info(f"Found recent message ID from history: {latest_message_id}")
+                return latest_message_id
+            else:
+                self.logger.warning(f"No messages found in history starting from {history_id}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching Gmail history {history_id}: {e}")
+            return None
+
     def _fetch_email_content(self, message_id: str) -> Dict[str, Any]:
         """Fetch full email content from Gmail API"""
         try:
