@@ -182,6 +182,15 @@ Webhook does:
 
 ---
 
+## 📚 Setup Guides
+
+For detailed setup instructions, see these guides:
+
+- **[Gmail Setup Guide](GMAIL_SETUP.md)** - Configure Gmail Pub/Sub integration
+- **[Render Deployment Guide](RENDER_DEPLOYMENT.md)** - Deploy webhook server to Render
+
+---
+
 ## 🧭 Service Architecture Diagram
 
 ```text
