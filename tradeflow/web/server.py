@@ -92,6 +92,25 @@ async def log_requests(request: Request, call_next):
     
     return response
 
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "service": "Trade Alert Webhook Server",
+        "version": "1.0.0",
+        "status": "running",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "health": "/health",
+            "status": "/status", 
+            "gmail_webhook": "/webhook/gmail",
+            "manual_trade": "/manual-trade",
+            "api_docs": "/docs",
+            "openapi": "/openapi.json"
+        },
+        "description": "Automated trading system webhook for Gmail Pub/Sub notifications"
+    }
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
