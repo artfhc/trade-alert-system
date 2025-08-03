@@ -1,1 +1,1 @@
-web: python fastapi_minimal.py
+web: python run_webhook_server.py
