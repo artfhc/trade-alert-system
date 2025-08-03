@@ -2,7 +2,7 @@ services:
   - type: web
     name: trade-alert-webhook
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r tradeflow/requirements.txt
     startCommand: python run_webhook_server.py
     plan: free
     envVars:
