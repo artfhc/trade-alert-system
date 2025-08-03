@@ -281,28 +281,54 @@ class GmailPubSubProvider(AlertProvider):
             if not self.gmail_service:
                 return None
             
-            # Get history starting from the given history ID
-            history = self.gmail_service.users().history().list(
-                userId='me',
-                startHistoryId=history_id,
-                maxResults=10  # Get recent messages
-            ).execute()
+            self.logger.info(f"Searching for messages around history ID: {history_id}")
             
-            messages = []
-            if 'history' in history:
-                for history_item in history['history']:
-                    if 'messagesAdded' in history_item:
-                        for message_added in history_item['messagesAdded']:
-                            messages.append(message_added['message']['id'])
+            # First, try to get messages from a slightly earlier history point
+            # because the historyId in Pub/Sub might be the current state
+            try:
+                earlier_history_id = str(int(history_id) - 100)  # Go back 100 history entries
+                self.logger.info(f"Trying earlier history ID: {earlier_history_id}")
+                
+                history = self.gmail_service.users().history().list(
+                    userId='me',
+                    startHistoryId=earlier_history_id,
+                    maxResults=50  # Get more messages to find recent ones
+                ).execute()
+                
+                messages = []
+                if 'history' in history:
+                    for history_item in history['history']:
+                        if 'messagesAdded' in history_item:
+                            for message_added in history_item['messagesAdded']:
+                                messages.append(message_added['message']['id'])
+                
+                if messages:
+                    latest_message_id = messages[-1]  # Get the last (most recent) message
+                    self.logger.info(f"Found recent message ID from earlier history: {latest_message_id}")
+                    return latest_message_id
+                    
+            except Exception as earlier_error:
+                self.logger.warning(f"Could not search earlier history: {earlier_error}")
             
-            # Return the most recent message ID
-            if messages:
-                latest_message_id = messages[-1]  # Get the last (most recent) message
-                self.logger.info(f"Found recent message ID from history: {latest_message_id}")
-                return latest_message_id
-            else:
-                self.logger.warning(f"No messages found in history starting from {history_id}")
-                return None
+            # If that didn't work, try getting recent messages directly
+            try:
+                self.logger.info("Trying to get recent messages directly")
+                messages_result = self.gmail_service.users().messages().list(
+                    userId='me',
+                    maxResults=10,
+                    q=""  # Get all recent messages
+                ).execute()
+                
+                if 'messages' in messages_result and messages_result['messages']:
+                    latest_message_id = messages_result['messages'][0]['id']  # First message is most recent
+                    self.logger.info(f"Found recent message ID from direct query: {latest_message_id}")
+                    return latest_message_id
+                    
+            except Exception as direct_error:
+                self.logger.warning(f"Could not get recent messages directly: {direct_error}")
+            
+            self.logger.warning(f"No messages found using any method for history {history_id}")
+            return None
                 
         except Exception as e:
             self.logger.error(f"Error fetching Gmail history {history_id}: {e}")
