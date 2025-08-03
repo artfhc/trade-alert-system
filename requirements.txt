@@ -1,8 +1,8 @@
 # Trade Alert System - Production Dependencies
 
 # Core web framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi==0.100.1
+uvicorn[standard]==0.23.2
 
 # Google services integration
 gspread==5.12.4
@@ -14,9 +14,12 @@ google-api-python-client==2.108.0
 # Environment and configuration
 python-dotenv==1.0.0
 
-# Data processing
-pydantic==2.5.0
+# Data processing (use compatible versions)
+pydantic==1.10.12
 python-dateutil==2.8.2
 
 # HTTP and async
 aiofiles==23.2.1
+
+# Additional dependencies for Render compatibility
+typing-extensions==4.8.0

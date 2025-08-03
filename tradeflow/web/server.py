@@ -7,7 +7,6 @@ import logging
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, Optional
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -32,10 +31,16 @@ logger = logging.getLogger(__name__)
 # Global variables for providers
 gmail_provider: Optional[GmailPubSubProvider] = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    # Startup
+# Create FastAPI application
+app = FastAPI(
+    title="Trade Alert Webhook Server",
+    description="Webhook server for processing Gmail Pub/Sub trade alerts",
+    version="1.0.0"
+)
+
+@app.on_event("startup")
+async def startup_event():
+    """Application startup event"""
     logger.info("🚀 Starting Trade Alert Webhook Server")
     global gmail_provider
     
@@ -51,19 +56,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         raise
-    
-    yield
-    
-    # Shutdown
-    logger.info("🛑 Shutting down Trade Alert Webhook Server")
 
-# Create FastAPI application
-app = FastAPI(
-    title="Trade Alert Webhook Server",
-    description="Webhook server for processing Gmail Pub/Sub trade alerts",
-    version="1.0.0",
-    lifespan=lifespan
-)
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown event"""
+    logger.info("🛑 Shutting down Trade Alert Webhook Server")
 
 # Configure CORS
 app.add_middleware(
