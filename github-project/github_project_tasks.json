@@ -1,0 +1,94 @@
+[
+  {
+    "title": "Set up Gmail API + Pub/Sub topic",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Build webhook FastAPI app",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Create `AlertProvider` abstraction",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Implement `GmailPubSubProvider`",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Add `AlertHandler` and `TradeFlow` classes",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Write LLM email parser",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Build forum scraper",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Add LLM forum parser",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Write Alpaca trade executor",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Implement Google Sheets logger",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Add support for Trade ID deduping",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Add .env file and config parser",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Design Google Sheet layout",
+    "body": "Status: To Do"
+  },
+  {
+    "title": "Testing Gmail \u2192 Webhook end-to-end",
+    "body": "Status: In Progress"
+  },
+  {
+    "title": "Debugging LLM output edge cases",
+    "body": "Status: In Progress"
+  },
+  {
+    "title": "Create GitHub project and repo",
+    "body": "Status: Done"
+  },
+  {
+    "title": "Write PRD and architecture",
+    "body": "Status: Done"
+  },
+  {
+    "title": "Decide on Render for hosting",
+    "body": "Status: Done"
+  },
+  {
+    "title": "Add Discord/Telegram `AlertProvider`s",
+    "body": "Status: Backlog"
+  },
+  {
+    "title": "Retry queue with deduping + delay",
+    "body": "Status: Backlog"
+  },
+  {
+    "title": "Database logging (Supabase/Postgres)",
+    "body": "Status: Backlog"
+  },
+  {
+    "title": "Add CLI or dashboard to review trades",
+    "body": "Status: Backlog"
+  },
+  {
+    "title": "Rate limiter + error tracker",
+    "body": "Status: Backlog"
+  }
+]
