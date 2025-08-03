@@ -3,19 +3,58 @@ Configuration management for secrets, API keys, and constants
 """
 
 import os
+import base64
+import json
+import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+def _create_temp_credentials_file(base64_content: str, prefix: str) -> str:
+    """Create a temporary file from base64 encoded credentials"""
+    try:
+        # Decode base64 content
+        json_content = base64.b64decode(base64_content).decode('utf-8')
+        
+        # Validate it's valid JSON
+        json.loads(json_content)
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', prefix=prefix, delete=False)
+        temp_file.write(json_content)
+        temp_file.close()
+        
+        return temp_file.name
+    except Exception as e:
+        raise ValueError(f"Failed to create credentials file from base64: {e}")
+
+def _get_credentials_file(env_var_file: str, env_var_json: str, default_file: str) -> str:
+    """Get credentials file path, either from file path or base64 JSON"""
+    # First try to get file path
+    file_path = os.getenv(env_var_file, default_file)
+    
+    # If file exists, use it
+    if os.path.exists(file_path):
+        return file_path
+    
+    # Otherwise, try to get base64 JSON and create temp file
+    base64_json = os.getenv(env_var_json)
+    if base64_json:
+        prefix = env_var_json.lower().replace('_', '-')
+        return _create_temp_credentials_file(base64_json, prefix)
+    
+    # Fall back to default file path (might not exist)
+    return file_path
+
 # =============================================================================
 # Google Cloud Configuration
 # =============================================================================
 
 GOOGLE_PROJECT_ID = os.getenv('GOOGLE_PROJECT_ID', 'gmail-trade-alert-system')
-GOOGLE_CREDENTIALS_FILE = os.getenv('GOOGLE_CREDENTIALS_FILE', 'credentials.json')
-GMAIL_CREDENTIALS_FILE = os.getenv('GMAIL_CREDENTIALS_FILE', 'gmail_credentials.json')
+GOOGLE_CREDENTIALS_FILE = _get_credentials_file('GOOGLE_CREDENTIALS_FILE', 'GOOGLE_CREDENTIALS_JSON', 'credentials.json')
+GMAIL_CREDENTIALS_FILE = _get_credentials_file('GMAIL_CREDENTIALS_FILE', 'GMAIL_CREDENTIALS_JSON', 'gmail_credentials.json')
 
 # =============================================================================
 # Pub/Sub Configuration  
