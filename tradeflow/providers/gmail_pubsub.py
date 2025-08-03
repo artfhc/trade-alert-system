@@ -59,26 +59,61 @@ class GmailPubSubProvider(AlertProvider):
             # If no valid credentials, get new ones
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
+                    try:
+                        creds.refresh(Request())
+                    except Exception as e:
+                        self.logger.error(f"Failed to refresh credentials: {e}")
+                        # In production, we can't do interactive auth, so we'll skip Gmail setup
+                        self._handle_production_auth_failure()
+                        return
                 else:
                     if not self.credentials_file:
-                        raise ValueError("Gmail credentials file not provided")
+                        self.logger.warning("Gmail credentials file not provided")
+                        self._handle_production_auth_failure()
+                        return
                     
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self.credentials_file, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
+                    # Check if we're in a production environment (no display/browser available)
+                    import os
+                    if os.getenv('ENVIRONMENT') == 'production' or not os.getenv('DISPLAY'):
+                        self.logger.warning("Production environment detected - skipping interactive OAuth")
+                        self._handle_production_auth_failure()
+                        return
+                    
+                    try:
+                        flow = InstalledAppFlow.from_client_secrets_file(
+                            self.credentials_file, self.SCOPES)
+                        creds = flow.run_local_server(port=0)
+                    except Exception as e:
+                        self.logger.error(f"Interactive OAuth failed: {e}")
+                        self._handle_production_auth_failure()
+                        return
                 
                 # Save credentials for future use
-                if self.token_file:
-                    with open(self.token_file, 'w') as token:
-                        token.write(creds.to_json())
+                if self.token_file and creds:
+                    try:
+                        with open(self.token_file, 'w') as token:
+                            token.write(creds.to_json())
+                    except Exception as e:
+                        self.logger.warning(f"Could not save token file: {e}")
             
-            self.gmail_service = build('gmail', 'v1', credentials=creds)
-            self.logger.info("Gmail API client initialized successfully")
+            if creds:
+                self.gmail_service = build('gmail', 'v1', credentials=creds)
+                self.logger.info("Gmail API client initialized successfully")
+            else:
+                self._handle_production_auth_failure()
             
         except Exception as e:
             self.logger.error(f"Failed to setup Gmail client: {e}")
-            raise
+            self._handle_production_auth_failure()
+    
+    def _handle_production_auth_failure(self):
+        """Handle authentication failure in production environment"""
+        self.gmail_service = None
+        self.logger.warning("Gmail service not available - webhook will accept messages but cannot fetch email content")
+        self.logger.info("For full functionality, you need to:")
+        self.logger.info("1. Run OAuth flow locally to generate gmail_token.json")
+        self.logger.info("2. Upload gmail_token.json to your production environment")
+        self.logger.info("3. Or use service account authentication instead")
     
     def get_source_name(self) -> str:
         """Get the source name for this provider"""
@@ -105,23 +140,34 @@ class GmailPubSubProvider(AlertProvider):
             # In a real implementation, you'd extract the message ID from the Pub/Sub notification
             gmail_message_id = pubsub_data.get('messageId', 'unknown')
             
-            # Fetch full email content from Gmail API
-            email_data = self._fetch_email_content(gmail_message_id)
+            # Default metadata and content
+            metadata = {
+                'message_id': gmail_message_id,
+                'sender': 'unknown',
+                'subject': 'Gmail Pub/Sub Notification',
+                'raw_pubsub_data': pubsub_data
+            }
+            timestamp = datetime.utcnow()
+            content = f"Gmail Pub/Sub notification received. Message ID: {gmail_message_id}"
             
-            # Extract metadata
-            metadata = self.extract_metadata(email_data)
-            
-            # Create timestamp
-            timestamp = self._extract_timestamp(email_data)
-            
-            # Get email content
-            content = self._extract_email_body(email_data)
-            content = self.sanitize_content(content)
+            # Try to fetch full email content from Gmail API if service is available
+            if self.gmail_service:
+                try:
+                    email_data = self._fetch_email_content(gmail_message_id)
+                    metadata = self.extract_metadata(email_data)
+                    timestamp = self._extract_timestamp(email_data)
+                    content = self._extract_email_body(email_data)
+                    content = self.sanitize_content(content)
+                except Exception as e:
+                    self.logger.warning(f"Could not fetch email content for {gmail_message_id}: {e}")
+                    # Keep default values
+            else:
+                self.logger.warning("Gmail service not available - using basic Pub/Sub data only")
             
             # Validate sender if whitelist is configured
             if self.sender_whitelist:
                 sender = metadata.get('sender', '')
-                if not any(allowed in sender for allowed in self.sender_whitelist):
+                if sender != 'unknown' and not any(allowed in sender for allowed in self.sender_whitelist):
                     raise ValueError(f"Sender {sender} not in whitelist")
             
             alert = Alert(

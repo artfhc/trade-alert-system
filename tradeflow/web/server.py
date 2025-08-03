@@ -17,7 +17,7 @@ import uvicorn
 from ..providers.gmail_pubsub import GmailPubSubProvider
 from ..config import (
     HOST, PORT, DEBUG, ENVIRONMENT,
-    GMAIL_CREDENTIALS_FILE, GMAIL_SENDER_WHITELIST,
+    GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST,
     WEBHOOK_SECRET
 )
 
@@ -48,6 +48,7 @@ async def startup_event():
         # Initialize Gmail provider
         gmail_provider = GmailPubSubProvider(
             credentials_file=GMAIL_CREDENTIALS_FILE,
+            token_file=GMAIL_TOKEN_FILE,
             sender_whitelist=GMAIL_SENDER_WHITELIST
         )
         logger.info("✅ Gmail provider initialized")
@@ -105,16 +106,26 @@ async def health_check():
 async def system_status():
     """System status endpoint"""
     gmail_status = "connected" if gmail_provider and gmail_provider.gmail_service else "disconnected"
+    gmail_auth_note = ""
+    
+    if gmail_provider and not gmail_provider.gmail_service:
+        gmail_auth_note = "Gmail authentication required for full functionality"
     
     return {
         "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
             "gmail_provider": gmail_status,
+            "gmail_note": gmail_auth_note,
             "trade_flow": "not_implemented"
         },
         "environment": ENVIRONMENT,
-        "debug": DEBUG
+        "debug": DEBUG,
+        "notes": [
+            "Webhook server is running and can receive Pub/Sub notifications",
+            "Gmail authentication is optional for basic webhook functionality",
+            "Full email parsing requires Gmail API authentication"
+        ]
     }
 
 async def process_trade_alert(alert_data: Dict[str, Any]):

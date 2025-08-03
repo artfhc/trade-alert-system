@@ -55,6 +55,7 @@ def _get_credentials_file(env_var_file: str, env_var_json: str, default_file: st
 GOOGLE_PROJECT_ID = os.getenv('GOOGLE_PROJECT_ID', 'gmail-trade-alert-system')
 GOOGLE_CREDENTIALS_FILE = _get_credentials_file('GOOGLE_CREDENTIALS_FILE', 'GOOGLE_CREDENTIALS_JSON', 'credentials.json')
 GMAIL_CREDENTIALS_FILE = _get_credentials_file('GMAIL_CREDENTIALS_FILE', 'GMAIL_CREDENTIALS_JSON', 'gmail_credentials.json')
+GMAIL_TOKEN_FILE = _get_credentials_file('GMAIL_TOKEN_FILE', 'GMAIL_TOKEN_JSON', 'gmail_token.json')
 
 # =============================================================================
 # Pub/Sub Configuration  
