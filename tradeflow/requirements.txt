@@ -1,7 +1,7 @@
 # TODO: Add Python dependencies for the trade alert system
 # TODO: Core web framework
-# fastapi
-# uvicorn[standard]
+fastapi
+uvicorn[standard]
 
 # TODO: HTTP client and web scraping
 # requests
