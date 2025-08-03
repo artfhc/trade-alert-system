@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: trade-alert-webhook
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_webhook_server.py
+    plan: free
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: GOOGLE_PROJECT_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_FILE
+        sync: false
+      - key: GMAIL_CREDENTIALS_FILE
+        sync: false
+      - key: PUBSUB_TOPIC
+        value: gmail-trade-alerts
+      - key: PUBSUB_SUBSCRIPTION
+        value: gmail-alerts-sub
+      - key: GMAIL_SENDER_WHITELIST
+        sync: false
+      - key: GMAIL_ALERT_KEYWORDS
+        value: trade,alert,buy,sell,position
