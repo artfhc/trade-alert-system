@@ -1,0 +1,53 @@
+# TODO: Add Python dependencies for the trade alert system
+# TODO: Core web framework
+# fastapi
+# uvicorn[standard]
+
+# TODO: HTTP client and web scraping
+# requests
+# beautifulsoup4
+# aiohttp
+
+# TODO: LLM API clients
+# openai
+# anthropic
+
+# TODO: Trading and financial data
+# alpaca-trade-api
+# yfinance
+
+# TODO: Google services integration
+# gspread
+# google-auth
+# google-auth-oauthlib
+# google-auth-httplib2
+# google-api-python-client
+
+# TODO: Data processing and validation
+# pydantic
+# pandas
+# python-dateutil
+
+# TODO: Environment and configuration
+# python-dotenv
+# pyyaml
+
+# TODO: Testing framework
+# pytest
+# pytest-asyncio
+# pytest-mock
+# httpx  # for testing FastAPI
+
+# TODO: Logging and monitoring
+# structlog
+# prometheus-client
+
+# TODO: Security and authentication
+# cryptography
+# PyJWT
+
+# TODO: Development tools
+# black
+# flake8
+# mypy
+# pre-commit
