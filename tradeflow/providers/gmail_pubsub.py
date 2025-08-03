@@ -171,17 +171,29 @@ class GmailPubSubProvider(AlertProvider):
                         recent_message = self._get_recent_message_from_history(history_id)
                         if recent_message:
                             email_data = self._fetch_email_content(recent_message)
+                            self.logger.info(f"Fetched email data for message {recent_message} (truncated for logs)")
+                            self.logger.debug(f"Full email data: {json.dumps(email_data, indent=2, default=str)}")
                             metadata = self.extract_metadata(email_data)
                             timestamp = self._extract_timestamp(email_data)
                             content = self._extract_email_body(email_data)
                             content = self.sanitize_content(content)
+                            self.logger.info(f"📧 Email content extracted from message {recent_message}:")
+                            self.logger.info(f"📧 Subject: {metadata.get('subject', 'N/A')}")
+                            self.logger.info(f"📧 From: {metadata.get('sender', 'N/A')}")
+                            self.logger.info(f"📧 Content: {content[:500]}...")  # First 500 chars
                     else:
                         # We have a direct message ID
                         email_data = self._fetch_email_content(gmail_message_id)
+                        self.logger.info(f"Fetched email data for message {gmail_message_id} (truncated for logs)")
+                        self.logger.debug(f"Full email data: {json.dumps(email_data, indent=2, default=str)}")
                         metadata = self.extract_metadata(email_data)
                         timestamp = self._extract_timestamp(email_data)
                         content = self._extract_email_body(email_data)
                         content = self.sanitize_content(content)
+                        self.logger.info(f"📧 Email content extracted from message {gmail_message_id}:")
+                        self.logger.info(f"📧 Subject: {metadata.get('subject', 'N/A')}")
+                        self.logger.info(f"📧 From: {metadata.get('sender', 'N/A')}")
+                        self.logger.info(f"📧 Content: {content[:500]}...")  # First 500 chars
                 except Exception as e:
                     self.logger.warning(f"Could not fetch email content for {gmail_message_id}: {e}")
                     # Keep default values
@@ -235,14 +247,14 @@ class GmailPubSubProvider(AlertProvider):
             message = raw_data.get('message', {})
             data = message.get('data', '')
             
-            self.logger.debug(f"Raw Pub/Sub message: {json.dumps(raw_data, indent=2)}")
+            self.logger.info(f"Raw Pub/Sub message: {json.dumps(raw_data, indent=2)}")
             
             if data:
                 try:
                     # Decode base64 data
                     decoded_data = base64.b64decode(data).decode('utf-8')
                     parsed_data = json.loads(decoded_data)
-                    self.logger.debug(f"Decoded Pub/Sub data: {json.dumps(parsed_data, indent=2)}")
+                    self.logger.info(f"Decoded Pub/Sub data: {json.dumps(parsed_data, indent=2)}")
                     return parsed_data
                 except Exception as decode_error:
                     self.logger.warning(f"Could not decode base64 data: {decode_error}")
@@ -251,7 +263,7 @@ class GmailPubSubProvider(AlertProvider):
             else:
                 # Sometimes the data might be directly in attributes or message itself
                 attributes = message.get('attributes', {})
-                self.logger.debug(f"Using Pub/Sub attributes: {json.dumps(attributes, indent=2)}")
+                self.logger.info(f"Using Pub/Sub attributes: {json.dumps(attributes, indent=2)}")
                 return attributes
                 
         except Exception as e:
