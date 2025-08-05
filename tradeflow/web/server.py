@@ -15,10 +15,12 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 
 from ..providers.gmail_pubsub import GmailPubSubProvider
+from ..logging.google_sheets import GoogleSheetsLogger
+from ..version import get_version
 from ..config import (
     HOST, PORT, DEBUG, ENVIRONMENT,
     GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST,
-    WEBHOOK_SECRET
+    WEBHOOK_SECRET, GOOGLE_CREDENTIALS_FILE, GOOGLE_SHEETS_DOC_ID, GOOGLE_SHEETS_WORKSHEET
 )
 
 # Configure logging
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Global variables for providers
 gmail_provider: Optional[GmailPubSubProvider] = None
+sheets_logger: Optional[GoogleSheetsLogger] = None
 
 # Create FastAPI application
 app = FastAPI(
@@ -41,8 +44,8 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     """Application startup event"""
-    logger.info("🚀 Starting Trade Alert Webhook Server")
-    global gmail_provider
+    logger.info(f"🚀 Starting Trade Alert Webhook Server v{get_version()}")
+    global gmail_provider, sheets_logger
     
     try:
         # Initialize Gmail provider
@@ -52,6 +55,15 @@ async def startup_event():
             sender_whitelist=GMAIL_SENDER_WHITELIST
         )
         logger.info("✅ Gmail provider initialized")
+        
+        # Initialize Google Sheets logger
+        sheets_logger = GoogleSheetsLogger(
+            credentials_file=GOOGLE_CREDENTIALS_FILE,
+            spreadsheet_id=GOOGLE_SHEETS_DOC_ID,
+            worksheet_name=GOOGLE_SHEETS_WORKSHEET
+        )
+        logger.info("✅ Google Sheets logger initialized")
+        
         logger.info("⚠️  Trade flow orchestrator not implemented yet - will log alerts only")
         
     except Exception as e:
@@ -97,7 +109,7 @@ async def root():
     """Root endpoint with API information"""
     return {
         "service": "Trade Alert Webhook Server",
-        "version": "1.0.0",
+        "version": get_version(),
         "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
         "endpoints": {
@@ -118,7 +130,7 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "service": "trade-alert-webhook",
-        "version": "1.0.0"
+        "version": get_version()
     }
 
 @app.get("/status")
@@ -149,24 +161,89 @@ async def system_status():
 
 async def process_trade_alert(alert_data: Dict[str, Any]):
     """Background task to process trade alert"""
+    alert = None
+    whitelist_status = "unknown"
+    
     try:
         logger.info("🔄 Processing trade alert in background")
         
         if not gmail_provider:
+            if sheets_logger:
+                sheets_logger.log_email_alert(
+                    alert=None,
+                    raw_data=alert_data,
+                    whitelist_status="unknown",
+                    processing_status="error",
+                    error_message="Gmail provider not initialized in background task"
+                )
             raise ValueError("Gmail provider not initialized")
         
         # Parse the alert
         alert = gmail_provider.parse_alert(alert_data)
         logger.info(f"✅ Alert parsed: {alert.content[:100]}...")
         
+        # Determine whitelist status
+        sender = alert.metadata.get('sender', '')
+        if not GMAIL_SENDER_WHITELIST:
+            whitelist_status = "no_whitelist"
+        elif gmail_provider.validate_sender(sender):
+            whitelist_status = "allowed"
+        else:
+            whitelist_status = "blocked"
+        
+        # Log the parsed alert with whitelist status
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=alert,
+                raw_data=alert_data,
+                whitelist_status=whitelist_status,
+                processing_status="parsed",
+                error_message=None
+            )
+        
+        # Check if sender is whitelisted (if whitelist is configured)
+        if whitelist_status == "blocked":
+            logger.warning(f"🚫 Sender {sender} not in whitelist - skipping processing")
+            if sheets_logger:
+                sheets_logger.log_email_alert(
+                    alert=alert,
+                    raw_data=alert_data,
+                    whitelist_status=whitelist_status,
+                    processing_status="blocked",
+                    error_message="Sender not in whitelist"
+                )
+            return
+        
         # TODO: Process with trade flow (not implemented yet)
         logger.info("📝 Alert received and parsed successfully")
         logger.info(f"📧 From: {alert.metadata.get('sender', 'unknown')}")
         logger.info(f"📃 Subject: {alert.metadata.get('subject', 'unknown')}")
+        logger.info(f"🔒 Whitelist Status: {whitelist_status}")
         logger.warning("⚠️ Trade flow not implemented yet - alert logged only")
         
+        # Log successful processing
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=alert,
+                raw_data=alert_data,
+                whitelist_status=whitelist_status,
+                processing_status="processing",
+                error_message="Trade flow not implemented yet"
+            )
+        
     except Exception as e:
-        logger.error(f"❌ Error processing trade alert: {e}")
+        error_msg = f"Error processing trade alert: {e}"
+        logger.error(f"❌ {error_msg}")
+        
+        # Log the error
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=alert,
+                raw_data=alert_data,
+                whitelist_status=whitelist_status,
+                processing_status="error",
+                error_message=error_msg
+            )
 
 @app.post("/webhook/gmail")
 async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -176,27 +253,55 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
     This endpoint receives push notifications from Google Cloud Pub/Sub
     when new emails arrive in the monitored Gmail account.
     """
+    data = None
+    message_id = "unknown"
+    
     try:
         # Get request data
         data = await request.json()
         
         logger.info("📧 Received Gmail Pub/Sub notification")
-        logger.info(f"Pub/Sub data: {json.dumps(data, indent=2)}")  # Changed to INFO to always see the data
+        logger.info(f"Pub/Sub data: {json.dumps(data, indent=2)}")
         
         # Validate Pub/Sub message format
         if "message" not in data:
+            # Log the failed message immediately
+            if sheets_logger:
+                sheets_logger.log_email_alert(
+                    alert=None,
+                    raw_data=data,
+                    whitelist_status="unknown",
+                    processing_status="error",
+                    error_message="Invalid Pub/Sub message format"
+                )
             raise HTTPException(status_code=400, detail="Invalid Pub/Sub message format")
         
         message = data["message"]
-        
-        # Extract message attributes for logging
         message_id = message.get("messageId", "unknown")
         publish_time = message.get("publishTime", "unknown")
         
         logger.info(f"📨 Message ID: {message_id}, Published: {publish_time}")
         
+        # LOG IMMEDIATELY - This ensures we capture every message regardless of processing outcome
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=None,
+                raw_data=data,
+                whitelist_status="pending_validation",
+                processing_status="received",
+                error_message=None
+            )
+        
         # Validate that we have required components
         if not gmail_provider:
+            if sheets_logger:
+                sheets_logger.log_email_alert(
+                    alert=None,
+                    raw_data=data,
+                    whitelist_status="unknown",
+                    processing_status="error",
+                    error_message="Gmail provider not initialized"
+                )
             logger.error("❌ Gmail provider not initialized")
             raise HTTPException(status_code=500, detail="Gmail provider not initialized")
         
@@ -212,10 +317,28 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
         }
         
     except json.JSONDecodeError:
+        # Log JSON decode error
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=None,
+                raw_data={"error": "Invalid JSON in request body"},
+                whitelist_status="unknown",
+                processing_status="error", 
+                error_message="Invalid JSON in request body"
+            )
         logger.error("❌ Invalid JSON in request body")
         raise HTTPException(status_code=400, detail="Invalid JSON")
     
     except Exception as e:
+        # Log any other errors
+        if sheets_logger:
+            sheets_logger.log_email_alert(
+                alert=None,
+                raw_data=data or {"error": "No data available"},
+                whitelist_status="unknown",
+                processing_status="error",
+                error_message=str(e)
+            )
         logger.error(f"❌ Error processing Gmail webhook: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
