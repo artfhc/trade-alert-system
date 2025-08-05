@@ -207,7 +207,8 @@ class GmailPubSubProvider(AlertProvider):
             if self.sender_whitelist:
                 sender = metadata.get('sender', '')
                 if sender != 'unknown' and not any(allowed in sender for allowed in self.sender_whitelist):
-                    raise ValueError(f"Sender {sender} not in whitelist")
+                    whitelist_str = ', '.join(self.sender_whitelist)
+                    raise ValueError(f"Sender '{sender}' not in whitelist. Allowed senders: {whitelist_str}")
             
             alert = Alert(
                 source=self.get_source_name(),
@@ -216,8 +217,9 @@ class GmailPubSubProvider(AlertProvider):
                 metadata=metadata
             )
             
-            if not self.validate_alert(alert):
-                raise ValueError("Alert validation failed")
+            is_valid, validation_error = self.validate_alert(alert)
+            if not is_valid:
+                raise ValueError(f"Alert validation failed: {validation_error}")
             
             return alert
             

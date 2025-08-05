@@ -79,7 +79,7 @@ class AlertProvider(ABC):
         
         return sanitized
     
-    def validate_alert(self, alert: Alert) -> bool:
+    def validate_alert(self, alert: Alert) -> tuple[bool, str]:
         """
         Validate that an alert meets basic requirements
         
@@ -87,37 +87,42 @@ class AlertProvider(ABC):
             alert: Alert object to validate
             
         Returns:
-            bool: True if valid, False otherwise
+            tuple[bool, str]: (is_valid, error_message)
         """
         try:
             # Check required fields
             if not alert.source:
-                self.logger.error("Alert missing source")
-                return False
+                error_msg = "Alert missing source field"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             if not alert.content:
-                self.logger.error("Alert missing content")
-                return False
+                error_msg = "Alert missing content field"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             if not isinstance(alert.timestamp, datetime):
-                self.logger.error("Alert timestamp is not a datetime object")
-                return False
+                error_msg = f"Alert timestamp is not a datetime object (got {type(alert.timestamp).__name__})"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             # Check content length limits
             if len(alert.content) > 10000:  # 10KB limit
-                self.logger.error(f"Alert content too long: {len(alert.content)} chars")
-                return False
+                error_msg = f"Alert content too long: {len(alert.content)} chars (max 10000)"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             # Timestamp should be recent (within last 24 hours for safety)
             time_diff = datetime.utcnow() - alert.timestamp
             if time_diff.total_seconds() > 86400:  # 24 hours
                 self.logger.warning(f"Alert timestamp is old: {alert.timestamp}")
             
-            return True
+            return True, ""
             
         except Exception as e:
-            self.logger.error(f"Error validating alert: {e}")
-            return False
+            error_msg = f"Error validating alert: {e}"
+            self.logger.error(error_msg)
+            return False, error_msg
 
 
 # AlertProvider registry for dynamic loading

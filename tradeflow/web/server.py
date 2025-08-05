@@ -210,7 +210,7 @@ async def process_trade_alert(alert_data: Dict[str, Any]):
                     raw_data=alert_data,
                     whitelist_status=whitelist_status,
                     processing_status="blocked",
-                    error_message="Sender not in whitelist"
+                    error_message=f"Sender '{sender}' not in configured whitelist"
                 )
             return
         
