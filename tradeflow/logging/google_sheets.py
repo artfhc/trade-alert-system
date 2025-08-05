@@ -70,33 +70,57 @@ class GoogleSheetsLogger:
     def _setup_sheets_client(self):
         """Setup Google Sheets client with service account authentication"""
         try:
+            logger.info(f"Setting up Google Sheets client...")
+            logger.info(f"Credentials file: {self.credentials_file}")
+            logger.info(f"Spreadsheet ID: {self.spreadsheet_id}")
+            logger.info(f"Worksheet name: {self.worksheet_name}")
+            
+            # Check if credentials file exists
+            import os
+            if not os.path.exists(self.credentials_file):
+                raise FileNotFoundError(f"Credentials file not found: {self.credentials_file}")
+            
             # Setup credentials with required scopes
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
             ]
             
+            logger.info("Loading service account credentials...")
             creds = Credentials.from_service_account_file(self.credentials_file, scopes=scopes)
+            
+            logger.info("Authorizing gspread client...")
             client = gspread.authorize(creds)
             
+            logger.info(f"Opening spreadsheet by key: {self.spreadsheet_id}")
             # Open the spreadsheet
             self.sheet = client.open_by_key(self.spreadsheet_id)
+            logger.info(f"Successfully opened spreadsheet: {self.sheet.title}")
             
             # Get or create the worksheet
             try:
+                logger.info(f"Looking for worksheet: {self.worksheet_name}")
                 self.worksheet = self.sheet.worksheet(self.worksheet_name)
                 logger.info(f"Connected to existing worksheet: {self.worksheet_name}")
             except gspread.WorksheetNotFound:
+                logger.info(f"Worksheet not found, creating: {self.worksheet_name}")
                 self.worksheet = self.sheet.add_worksheet(title=self.worksheet_name, rows=1000, cols=len(self.HEADERS))
                 logger.info(f"Created new worksheet: {self.worksheet_name}")
             
             # Setup headers if worksheet is empty
+            logger.info("Ensuring headers are set...")
             self._ensure_headers()
             
             logger.info(f"Google Sheets client initialized successfully")
             
+        except FileNotFoundError as e:
+            logger.error(f"Credentials file error: {e}")
+            self.sheet = None
+            self.worksheet = None
         except Exception as e:
-            logger.error(f"Failed to setup Google Sheets client: {e}")
+            logger.error(f"Failed to setup Google Sheets client: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             self.sheet = None
             self.worksheet = None
     
