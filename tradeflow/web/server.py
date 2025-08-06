@@ -340,7 +340,12 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
                 error_message=str(e)
             )
         logger.error(f"❌ Error processing Gmail webhook: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        # Return 200 to acknowledge message and prevent retries for permanent failures
+        # Only return 500 for truly retryable errors (network issues, temporary failures)
+        return JSONResponse(
+            status_code=200, 
+            content={"status": "error", "message": f"Processed with error: {str(e)}"}
+        )
 
 @app.post("/manual-trade")
 async def manual_trade(request: Request, background_tasks: BackgroundTasks):
