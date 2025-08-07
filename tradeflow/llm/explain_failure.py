@@ -10,7 +10,7 @@ LLM-generated error summaries and failure explanations
 
 # TODO: Create error categorization system:
 #   - API failures (Alpaca, Gmail, etc.)
-#   - Parsing errors (LLM, forum scraping)
+#   - Parsing errors (LLM email parsing)
 #   - Validation errors (invalid symbols, sizing)
 #   - Market-related errors (closed markets, halted stocks)
 #   - Authentication/permission errors

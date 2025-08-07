@@ -22,8 +22,7 @@ Unit tests, mocks, and integration tests for the trade flow system
 
 # TODO: Implement parser tests:
 #   - Test EmailLLMParser with mock LLM responses
-#   - Test ForumScraper with mock HTML content
-#   - Test ForumLLMParser sizing extraction
+#   - Test trade detail extraction from email content
 #   - Test error handling in parsers
 
 # TODO: Create broker tests:

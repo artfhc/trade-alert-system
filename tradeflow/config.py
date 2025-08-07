@@ -115,15 +115,6 @@ PORT = int(os.getenv('PORT', '8000'))
 WEBHOOK_BASE_URL = os.getenv('WEBHOOK_BASE_URL')
 WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET')
 
-# =============================================================================
-# Forum Scraping Configuration
-# =============================================================================
-
-FORUM_BASE_URL = os.getenv('FORUM_BASE_URL', 'https://io-fund.com')
-FORUM_LOGIN_URL = os.getenv('FORUM_LOGIN_URL', 'https://io-fund.com/login')
-FORUM_USERNAME = os.getenv('FORUM_USERNAME')
-FORUM_PASSWORD = os.getenv('FORUM_PASSWORD')
-USER_AGENT = os.getenv('USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
 # =============================================================================
 # Trading Configuration

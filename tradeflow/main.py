@@ -11,7 +11,7 @@ Entry point (webhook handler) for the trade alert system
 # TODO: Initialize core services:
 #   - Create TradeFlow orchestrator instance
 #   - Set up AlertProvider (GmailPubSubProvider)
-#   - Initialize LLM parsers (email and forum)
+#   - Initialize LLM email parser
 #   - Set up Alpaca client and position sizer
 #   - Initialize Google Sheets logger
 

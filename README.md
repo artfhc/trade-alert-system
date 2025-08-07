@@ -5,7 +5,7 @@
 ## 📝 1. Product Requirements Document (PRD)
 
 ### 💡 One-Sentence Summary
-An automated, pluggable trading system that reacts to trade alerts from email (via Gmail Pub/Sub), extracts actionable details using LLMs, scrapes trade sizing from a secure forum, executes orders through Alpaca, and logs every action to Google Sheets.
+An automated, pluggable trading system that reacts to trade alerts from email (via Gmail Pub/Sub), extracts actionable details using LLMs, executes orders through Alpaca, and logs every action to Google Sheets.
 
 ---
 
@@ -13,12 +13,11 @@ An automated, pluggable trading system that reacts to trade alerts from email (v
 1. A new trade alert is pushed to the system (via Gmail Pub/Sub)
 2. The alert is parsed and normalized by an abstract `AlertProvider`
 3. A `Trade ID` is created and a "pending" record is logged
-4. System logs into `io-fund.com` and scrapes the forum post
-5. LLM extracts sizing (e.g., “Buy 5% of portfolio”) from scraped content
-6. System calculates the position size using Alpaca account balance
-7. Market order is placed via Alpaca API
-8. Result (success, fail, or pending) is logged as a new row in Google Sheets
-9. LLM generates a user-friendly error message if the trade fails
+4. LLM extracts trade details (ticker, action, sizing) from email content
+5. System calculates the position size using Alpaca account balance
+6. Market order is placed via Alpaca API
+7. Result (success, fail, or pending) is logged as a new row in Google Sheets
+8. LLM generates a user-friendly error message if the trade fails
 
 ---
 
@@ -32,7 +31,7 @@ An automated, pluggable trading system that reacts to trade alerts from email (v
 ### 🔧 Core Features
 - **Pluggable alert ingestion** via `AlertProvider` abstraction
 - Reactive trigger from Gmail → Pub/Sub → Webhook
-- LLM-based parsing for email and forum content
+- LLM-based parsing for email content
 - Trade sizing logic + execution via Alpaca
 - Append-only event stream logging to Google Sheets
 - LLM-generated explanations on failure
@@ -43,7 +42,6 @@ An automated, pluggable trading system that reacts to trade alerts from email (v
 - **Python** (core orchestrator)
 - **Gmail API + Google Pub/Sub** (email trigger)
 - **Alpaca API** (market order execution)
-- **BeautifulSoup** (HTML scraping)
 - **OpenAI / Claude API** (LLM parsing & summarization)
 - **gspread** (Google Sheets integration)
 - **Render / Railway / VPS** (hosting)
@@ -76,8 +74,7 @@ An automated, pluggable trading system that reacts to trade alerts from email (v
  ┌────────────────────────────────────────────┐
  │ TradeFlow Orchestration:                   │
  │  • LLM parses email                        │
- │  • Login & scrape forum                    │
- │  • LLM extracts sizing                     │
+ │  • Extract trade details & sizing          │
  │  • Compute quantity                        │
  │  • Execute via Alpaca                      │
  │  • Log to Google Sheet                     │
@@ -122,9 +119,7 @@ tradeflow/
 │   └── gmail_pubsub.py          # Gmail Pub/Sub implementation
 │
 ├── parsers/
-│   ├── email_llm.py             # LLM-based email parser
-│   ├── forum_scraper.py         # HTML scraper for io-fund
-│   └── forum_llm.py             # LLM sizing extraction from scraped HTML
+│   └── email_llm.py             # LLM-based email parser
 │
 ├── broker/                     # Trading and brokerage integration
 │   ├── alpaca_client.py         # Alpaca SDK wrapper
@@ -174,8 +169,7 @@ Use **Render.com** (or Railway.app) to host the Python app:
 
 Webhook does:
   • Parse Alert
-  • Scrape forum
-  • Run LLM(s)
+  • Run LLM parsing
   • Call Alpaca
   • Log to Google Sheets
 ```
@@ -213,7 +207,7 @@ For detailed setup instructions, see these guides:
                 +--------------------------+
                 |  TradeFlow Orchestrator  |
                 | - LLM Email Parser       |
-                | - Forum Scraper + LLM    |
+                | - Trade Execution        |
                 | - Alpaca Trade API       |
                 | - Google Sheet Logger    |
                 +--------------------------+

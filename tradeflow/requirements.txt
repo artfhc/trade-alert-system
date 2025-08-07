@@ -3,9 +3,8 @@
 fastapi
 uvicorn[standard]
 
-# TODO: HTTP client and web scraping
+# TODO: HTTP client
 # requests
-# beautifulsoup4
 # aiohttp
 
 # LLM API clients
