@@ -10,7 +10,10 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import re
 
-from ..config import OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENAI_MODEL, OPENAI_MAX_TOKENS
+from ..config import (
+    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MAX_TOKENS, OPENAI_TEMPERATURE,
+    ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS, ANTHROPIC_TEMPERATURE
+)
 
 
 logger = logging.getLogger(__name__)
@@ -98,7 +101,7 @@ class EmailLLMParser:
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=OPENAI_MAX_TOKENS,
-                temperature=0.1  # Low temperature for consistent parsing
+                temperature=OPENAI_TEMPERATURE
             )
             
             return response.choices[0].message.content.strip()
@@ -117,9 +120,9 @@ class EmailLLMParser:
         
         try:
             message = self.anthropic_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,
-                temperature=0.1,
+                model=ANTHROPIC_MODEL,
+                max_tokens=ANTHROPIC_MAX_TOKENS,
+                temperature=ANTHROPIC_TEMPERATURE,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": user_prompt}

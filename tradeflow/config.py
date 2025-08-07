@@ -85,11 +85,17 @@ ALPACA_BASE_URL = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets
 # LLM Configuration
 # =============================================================================
 
+# OpenAI Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4')
 OPENAI_MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS', '1000'))
+OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', '0.1'))
 
+# Anthropic Configuration  
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022')
+ANTHROPIC_MAX_TOKENS = int(os.getenv('ANTHROPIC_MAX_TOKENS', '1000'))
+ANTHROPIC_TEMPERATURE = float(os.getenv('ANTHROPIC_TEMPERATURE', '0.1'))
 
 # =============================================================================
 # Google Sheets Logging
