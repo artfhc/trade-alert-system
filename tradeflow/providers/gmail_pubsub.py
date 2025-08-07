@@ -204,19 +204,24 @@ class GmailPubSubProvider(AlertProvider):
                 else:
                     self.logger.warning(f"Invalid Gmail message ID: {gmail_message_id} - using basic Pub/Sub data only")
             
-            # Validate sender if whitelist is configured
-            if self.sender_whitelist:
-                sender = metadata.get('sender', '')
-                if sender != 'unknown' and not any(allowed in sender for allowed in self.sender_whitelist):
-                    whitelist_str = ', '.join(self.sender_whitelist)
-                    raise ValueError(f"Sender '{sender}' not in whitelist. Allowed senders: {whitelist_str}")
-            
-            # Validate sender domain if domain whitelist is configured
-            if self.domain_whitelist:
-                sender = metadata.get('sender', '')
-                if sender != 'unknown' and not self._is_domain_whitelisted(sender):
-                    domain_str = ', '.join(self.domain_whitelist)
-                    raise ValueError(f"Sender domain for '{sender}' not in whitelist. Allowed domains: {domain_str}")
+            # Validate sender and domain whitelists
+            sender = metadata.get('sender', '')
+            if sender != 'unknown' and (self.sender_whitelist or self.domain_whitelist):
+                sender_allowed = not self.sender_whitelist or any(allowed in sender for allowed in self.sender_whitelist)
+                domain_allowed = not self.domain_whitelist or self._is_domain_whitelisted(sender)
+                
+                # Allow if either whitelist passes (or if no whitelist is configured for that type)
+                if not (sender_allowed or domain_allowed):
+                    error_parts = []
+                    if self.sender_whitelist:
+                        whitelist_str = ', '.join(self.sender_whitelist)
+                        error_parts.append(f"sender not in whitelist (allowed: {whitelist_str})")
+                    if self.domain_whitelist:
+                        domain_str = ', '.join(self.domain_whitelist)
+                        error_parts.append(f"domain not in whitelist (allowed: {domain_str})")
+                    
+                    error_message = f"Sender '{sender}' rejected: " + " and ".join(error_parts)
+                    raise ValueError(error_message)
             
             alert = Alert(
                 source=self.get_source_name(),
