@@ -1,0 +1,311 @@
+"""
+Pipeline handlers for processing trade alerts
+
+Each handler has a single responsibility, replacing the monolithic
+process_trade_alert() function with clean, testable components.
+"""
+
+import logging
+import time
+from abc import ABC, abstractmethod
+from typing import Optional
+
+from .context import ProcessingContext
+from ..services.container import ServiceContainer
+from ..core.models import Alert
+
+logger = logging.getLogger(__name__)
+
+
+class Handler(ABC):
+    """
+    Base class for pipeline handlers
+    
+    Implements Chain of Responsibility pattern with consistent error handling
+    and logging. Each handler focuses on a single responsibility.
+    """
+    
+    def __init__(self, container: ServiceContainer):
+        self.container = container
+        self._next_handler: Optional['Handler'] = None
+    
+    def set_next(self, handler: 'Handler') -> 'Handler':
+        """Set the next handler in the chain"""
+        self._next_handler = handler
+        return handler
+    
+    def handle(self, context: ProcessingContext) -> ProcessingContext:
+        """
+        Process the context and pass to next handler
+        
+        Template method that provides consistent error handling
+        and logging for all handlers.
+        """
+        handler_name = self.__class__.__name__
+        context.start_handler(handler_name)
+        
+        try:
+            logger.info(f"🔄 Processing with {handler_name}")
+            
+            # Skip processing if context has errors or should not continue
+            if not context.should_continue_processing():
+                logger.info(f"⏭️  Skipping {handler_name} - processing stopped")
+                return self.handle_next(context)
+            
+            # Execute handler-specific logic
+            self.process(context)
+            
+            # Mark handler as completed
+            context.mark_handler_complete(handler_name)
+            logger.info(f"✅ {handler_name} completed successfully")
+            
+        except Exception as e:
+            error_message = f"{handler_name} failed: {str(e)}"
+            context.set_error(error_message, "error")
+            logger.error(f"❌ {error_message}")
+        
+        # Continue to next handler
+        return self.handle_next(context)
+    
+    @abstractmethod
+    def process(self, context: ProcessingContext) -> None:
+        """Handler-specific processing logic"""
+        pass
+    
+    def handle_next(self, context: ProcessingContext) -> ProcessingContext:
+        """Pass context to next handler if available"""
+        if self._next_handler:
+            return self._next_handler.handle(context)
+        return context
+
+
+class ParseAlertHandler(Handler):
+    """
+    Parse raw Pub/Sub data into Alert object
+    
+    Replaces the alert parsing section from the monolithic function
+    """
+    
+    def process(self, context: ProcessingContext) -> None:
+        gmail_provider = self.container.get("gmail_provider")
+        
+        if not gmail_provider:
+            raise ValueError("Gmail provider not available")
+        
+        # Parse the alert
+        alert = gmail_provider.parse_alert(context.raw_data)
+        
+        # Update context
+        context.alert = alert
+        context.message_id = alert.metadata.get('message_id', 'unknown')
+        context.sender = alert.metadata.get('sender', 'unknown')
+        context.metadata = alert.metadata
+        context.processing_status = "parsed"
+        
+        logger.info(f"📧 Alert parsed from {context.sender}")
+        logger.info(f"📝 Content preview: {alert.content[:100]}...")
+
+
+class ValidateWhitelistHandler(Handler):
+    """
+    Validate sender against whitelist configuration
+    
+    Replaces the whitelist validation logic from the monolithic function
+    """
+    
+    def process(self, context: ProcessingContext) -> None:
+        if not context.alert:
+            raise ValueError("No alert available for whitelist validation")
+        
+        gmail_provider = self.container.get("gmail_provider")
+        sender = context.sender
+        
+        # Check if whitelists are configured
+        has_sender_whitelist = bool(self.container.config.gmail_sender_whitelist)
+        has_domain_whitelist = bool(self.container.config.gmail_domain_whitelist)
+        
+        if not has_sender_whitelist and not has_domain_whitelist:
+            context.whitelist_status = "no_whitelist"
+            logger.info("📂 No whitelist configured - allowing all senders")
+            return
+        
+        # Validate sender and domain
+        sender_ok = not has_sender_whitelist or gmail_provider.validate_sender(sender)
+        domain_ok = not has_domain_whitelist or gmail_provider._is_domain_whitelisted(sender)
+        
+        # Allow if EITHER check passes
+        if sender_ok or domain_ok:
+            context.whitelist_status = "allowed"
+            logger.info(f"✅ Sender {sender} passed whitelist validation")
+        else:
+            context.whitelist_status = "blocked"
+            context.set_error(f"Sender '{sender}' not in whitelist", "blocked")
+            logger.warning(f"🚫 Sender {sender} blocked by whitelist")
+
+
+class LLMAnalysisHandler(Handler):
+    """
+    Process email content with LLM for trade analysis
+    
+    Replaces the LLM processing section from the monolithic function
+    """
+    
+    def process(self, context: ProcessingContext) -> None:
+        if not context.alert:
+            raise ValueError("No alert available for LLM analysis")
+        
+        email_parser = self.container.get_optional("email_parser")
+        
+        if not email_parser:
+            context.processing_status = "llm_not_available"
+            context.llm_provider = "not_available"
+            logger.warning("⚠️ Email LLM Parser not available - skipping LLM analysis")
+            return
+        
+        logger.info("🧠 Processing email with LLM Parser")
+        
+        # Track processing time
+        start_time = time.time()
+        
+        try:
+            # Parse email content
+            llm_parse_result = email_parser.parse_email(context.alert.content)
+            
+            # Calculate processing time
+            context.processing_time_ms = (time.time() - start_time) * 1000
+            
+            # Determine which LLM provider was used
+            context.llm_provider = self._determine_llm_provider(email_parser, llm_parse_result)
+            
+            # Update context
+            context.llm_parse_result = llm_parse_result
+            
+            # Set processing status based on results
+            if llm_parse_result.error:
+                context.set_error(f"LLM parsing failed: {llm_parse_result.error}", "llm_error")
+                logger.error(f"❌ LLM parsing failed: {llm_parse_result.error}")
+            elif llm_parse_result.is_trading_alert:
+                context.processing_status = "parsed_trading_alert"
+                self._log_trading_alert_details(context)
+            else:
+                context.processing_status = "parsed_non_trading"
+                logger.info("📧 Email classified as non-trading content")
+                
+            logger.info(f"⏱️  LLM processing completed in {context.processing_time_ms:.1f}ms using {context.llm_provider}")
+            
+        except Exception as e:
+            context.processing_time_ms = (time.time() - start_time) * 1000
+            context.llm_provider = "error"
+            raise ValueError(f"LLM analysis failed: {str(e)}")
+    
+    def _determine_llm_provider(self, email_parser, llm_parse_result) -> str:
+        """Determine which LLM provider was used for the analysis"""
+        if llm_parse_result.raw_response:
+            if hasattr(email_parser, 'anthropic_client') and email_parser.anthropic_client:
+                return "Anthropic"
+            elif hasattr(email_parser, 'openai_client') and email_parser.openai_client:
+                return "OpenAI"
+        return "unknown"
+    
+    def _log_trading_alert_details(self, context: ProcessingContext) -> None:
+        """Log details of detected trading alert"""
+        logger.info("✅ Trading alert detected!")
+        
+        if context.llm_parse_result and context.llm_parse_result.trades:
+            trades = context.llm_parse_result.trades
+            logger.info(f"📈 Found {len(trades)} trade(s):")
+            
+            for i, trade in enumerate(trades, 1):
+                logger.info(f"  {i}. {trade.get('ticker', 'N/A')}: {trade.get('action', 'N/A')}")
+                if trade.get('price'):
+                    logger.info(f"     Price: ${trade['price']}")
+                if trade.get('target_allocation'):
+                    logger.info(f"     Target Allocation: {trade['target_allocation']}")
+
+
+class LoggingHandler(Handler):
+    """
+    Log processing results to Google Sheets
+    
+    Replaces the dual logging logic from the monolithic function
+    """
+    
+    def process(self, context: ProcessingContext) -> None:
+        if not context.alert:
+            raise ValueError("No alert available for logging")
+        
+        # Log to main trade log
+        self._log_to_sheets(context)
+        
+        # Log to LLM parsing log if LLM analysis was performed
+        if context.llm_parse_result is not None or context.llm_provider != "none":
+            self._log_to_llm_sheets(context)
+        
+        # Mark processing as completed
+        if not context.has_error():
+            context.processing_status = "completed"
+        
+        logger.info("📊 Logging completed successfully")
+    
+    def _log_to_sheets(self, context: ProcessingContext) -> None:
+        """Log to main Google Sheets trade log"""
+        sheets_logger = self.container.get_optional("sheets_logger")
+        
+        if not sheets_logger:
+            logger.warning("⚠️ Google Sheets logger not available")
+            return
+        
+        # Create enhanced alert with LLM metadata
+        enhanced_alert = self._create_enhanced_alert(context)
+        
+        sheets_logger.log_email_alert(
+            alert=enhanced_alert,
+            raw_data=context.raw_data,
+            whitelist_status=context.whitelist_status,
+            processing_status=context.processing_status,
+            error_message=context.error_message
+        )
+        
+        logger.info("📊 Logged to main Google Sheets")
+    
+    def _log_to_llm_sheets(self, context: ProcessingContext) -> None:
+        """Log to LLM-specific Google Sheets log"""
+        llm_logger = self.container.get_optional("llm_logger")
+        
+        if not llm_logger:
+            logger.warning("⚠️ LLM logger not available")
+            return
+        
+        llm_logger.log_llm_parsing_result(
+            alert=context.alert,
+            llm_parse_result=context.llm_parse_result,
+            llm_provider=context.llm_provider,
+            processing_time_ms=context.processing_time_ms,
+            error_message=context.error_message
+        )
+        
+        logger.info("📊 Logged to LLM parsing Google Sheets")
+    
+    def _create_enhanced_alert(self, context: ProcessingContext) -> Alert:
+        """Create alert with enhanced metadata for logging"""
+        enhanced_metadata = context.metadata.copy()
+        
+        # Add LLM parsing results to metadata
+        if context.llm_parse_result:
+            enhanced_metadata.update({
+                'llm_is_trading_alert': context.llm_parse_result.is_trading_alert,
+                'llm_trades_count': len(context.llm_parse_result.trades) if context.llm_parse_result.trades else 0,
+                'llm_raw_response': context.llm_parse_result.raw_response[:500] if context.llm_parse_result.raw_response else None  # Truncate
+            })
+            
+            if context.llm_parse_result.trades:
+                enhanced_metadata['llm_tickers'] = [trade.get('ticker') for trade in context.llm_parse_result.trades]
+                enhanced_metadata['llm_actions'] = [trade.get('action') for trade in context.llm_parse_result.trades]
+        
+        # Create enhanced alert
+        return Alert(
+            source=context.alert.source,
+            content=context.alert.content,
+            timestamp=context.alert.timestamp,
+            metadata=enhanced_metadata
+        )
