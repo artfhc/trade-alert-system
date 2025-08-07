@@ -15,12 +15,14 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 
 from ..providers.gmail_pubsub import GmailPubSubProvider
-from ..logging.google_sheets import GoogleSheetsLogger
+from ..logging.google_sheets import GoogleSheetsLogger, LLMParsingLogger
+from ..parsers.email_llm import EmailLLMParser
 from ..version import get_version
 from ..config import (
     HOST, PORT, DEBUG, ENVIRONMENT,
     GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST,
-    WEBHOOK_SECRET, GOOGLE_CREDENTIALS_FILE, GOOGLE_SHEETS_DOC_ID, GOOGLE_SHEETS_WORKSHEET
+    WEBHOOK_SECRET, GOOGLE_CREDENTIALS_FILE, GOOGLE_SHEETS_DOC_ID, 
+    GOOGLE_SHEETS_WORKSHEET, GOOGLE_SHEETS_LLM_WORKSHEET
 )
 
 # Configure logging
@@ -33,6 +35,8 @@ logger = logging.getLogger(__name__)
 # Global variables for providers
 gmail_provider: Optional[GmailPubSubProvider] = None
 sheets_logger: Optional[GoogleSheetsLogger] = None
+llm_logger: Optional[LLMParsingLogger] = None
+email_parser: Optional[EmailLLMParser] = None
 
 # Create FastAPI application
 app = FastAPI(
@@ -45,7 +49,7 @@ app = FastAPI(
 async def startup_event():
     """Application startup event"""
     logger.info(f"🚀 Starting Trade Alert Webhook Server v{get_version()}")
-    global gmail_provider, sheets_logger
+    global gmail_provider, sheets_logger, llm_logger, email_parser
     
     try:
         # Initialize Gmail provider
@@ -64,7 +68,24 @@ async def startup_event():
         )
         logger.info("✅ Google Sheets logger initialized")
         
-        logger.info("⚠️  Trade flow orchestrator not implemented yet - will log alerts only")
+        # Initialize LLM Parsing logger
+        llm_logger = LLMParsingLogger(
+            credentials_file=GOOGLE_CREDENTIALS_FILE,
+            spreadsheet_id=GOOGLE_SHEETS_DOC_ID,
+            worksheet_name=GOOGLE_SHEETS_LLM_WORKSHEET
+        )
+        logger.info("✅ LLM Parsing logger initialized")
+        
+        # Initialize Email LLM Parser
+        try:
+            email_parser = EmailLLMParser()
+            logger.info("✅ Email LLM Parser initialized")
+        except Exception as parser_error:
+            logger.warning(f"⚠️ Email LLM Parser initialization failed: {parser_error}")
+            logger.warning("📝 Emails will be processed without LLM parsing")
+            email_parser = None
+        
+        logger.info("⚠️  Trade flow orchestrator not implemented yet - will log alerts with LLM parsing")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
@@ -142,12 +163,33 @@ async def system_status():
     if gmail_provider and not gmail_provider.gmail_service:
         gmail_auth_note = "Gmail authentication required for full functionality"
     
+    # Check Email LLM Parser status
+    llm_parser_status = "available" if email_parser else "not_available"
+    llm_parser_note = ""
+    
+    if not email_parser:
+        llm_parser_note = "Email LLM Parser not initialized - requires OPENAI_API_KEY or ANTHROPIC_API_KEY"
+    else:
+        # Check which LLM clients are available
+        clients = []
+        if hasattr(email_parser, 'openai_client') and email_parser.openai_client:
+            clients.append("OpenAI")
+        if hasattr(email_parser, 'anthropic_client') and email_parser.anthropic_client:
+            clients.append("Anthropic")
+        
+        if clients:
+            llm_parser_note = f"Available LLM clients: {', '.join(clients)}"
+        else:
+            llm_parser_note = "No LLM clients available"
+    
     return {
         "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
             "gmail_provider": gmail_status,
             "gmail_note": gmail_auth_note,
+            "email_llm_parser": llm_parser_status,
+            "llm_parser_note": llm_parser_note,
             "trade_flow": "not_implemented"
         },
         "environment": ENVIRONMENT,
@@ -155,7 +197,8 @@ async def system_status():
         "notes": [
             "Webhook server is running and can receive Pub/Sub notifications",
             "Gmail authentication is optional for basic webhook functionality",
-            "Full email parsing requires Gmail API authentication"
+            "Email LLM Parser provides intelligent trade alert classification",
+            "Trade flow orchestrator not implemented yet"
         ]
     }
 
@@ -214,21 +257,139 @@ async def process_trade_alert(alert_data: Dict[str, Any]):
                 )
             return
         
-        # TODO: Process with trade flow (not implemented yet)
+        # Process with Email LLM Parser
+        llm_parse_result = None
+        llm_error = None
+        llm_provider = "none"
+        processing_time_ms = 0
+        
+        if email_parser:
+            try:
+                logger.info("🧠 Processing email with LLM Parser")
+                
+                # Track processing time
+                import time
+                start_time = time.time()
+                
+                llm_parse_result = email_parser.parse_email(alert.content)
+                
+                # Calculate processing time
+                processing_time_ms = (time.time() - start_time) * 1000
+                
+                # Determine which LLM provider was used
+                if llm_parse_result.raw_response:
+                    if hasattr(email_parser, 'anthropic_client') and email_parser.anthropic_client:
+                        llm_provider = "Anthropic"
+                    elif hasattr(email_parser, 'openai_client') and email_parser.openai_client:
+                        llm_provider = "OpenAI"
+                else:
+                    llm_provider = "failed"
+                
+                if llm_parse_result.error:
+                    llm_error = f"LLM parsing failed: {llm_parse_result.error}"
+                    logger.error(f"❌ {llm_error}")
+                else:
+                    logger.info(f"✅ LLM Classification: {'Trading Alert' if llm_parse_result.is_trading_alert else 'Non-Trading Email'}")
+                    logger.info(f"⏱️  Processing Time: {processing_time_ms:.1f}ms with {llm_provider}")
+                    
+                    if llm_parse_result.is_trading_alert and llm_parse_result.trades:
+                        logger.info(f"📈 Found {len(llm_parse_result.trades)} trade(s):")
+                        for i, trade in enumerate(llm_parse_result.trades, 1):
+                            logger.info(f"  {i}. {trade['ticker']}: {trade['action']}")
+                            if trade.get('price'):
+                                logger.info(f"     Price: ${trade['price']}")
+                            if trade.get('target_allocation'):
+                                logger.info(f"     Target Allocation: {trade['target_allocation']}")
+                    else:
+                        logger.info("📧 Email classified as non-trading content")
+                
+                # Log LLM parsing result to dedicated worksheet
+                if llm_logger:
+                    llm_logger.log_llm_parsing_result(
+                        alert=alert,
+                        llm_parse_result=llm_parse_result,
+                        llm_provider=llm_provider,
+                        processing_time_ms=processing_time_ms,
+                        error_message=llm_error
+                    )
+                        
+            except Exception as e:
+                llm_error = f"LLM parsing exception: {str(e)}"
+                logger.error(f"❌ {llm_error}")
+                
+                # Log the exception to LLM logger
+                if llm_logger:
+                    llm_logger.log_llm_parsing_result(
+                        alert=alert,
+                        llm_parse_result=None,
+                        llm_provider="error",
+                        processing_time_ms=processing_time_ms,
+                        error_message=llm_error
+                    )
+        else:
+            llm_error = "Email LLM Parser not available"
+            logger.warning("⚠️ Email LLM Parser not initialized - skipping LLM processing")
+            
+            # Log that LLM parser is not available
+            if llm_logger:
+                llm_logger.log_llm_parsing_result(
+                    alert=alert,
+                    llm_parse_result=None,
+                    llm_provider="not_available",
+                    processing_time_ms=0,
+                    error_message=llm_error
+                )
+        
+        # TODO: Process with trade flow orchestrator (not implemented yet)
         logger.info("📝 Alert received and parsed successfully")
         logger.info(f"📧 From: {alert.metadata.get('sender', 'unknown')}")
         logger.info(f"📃 Subject: {alert.metadata.get('subject', 'unknown')}")
         logger.info(f"🔒 Whitelist Status: {whitelist_status}")
-        logger.warning("⚠️ Trade flow not implemented yet - alert logged only")
+        logger.warning("⚠️ Trade flow orchestrator not implemented yet - alert logged only")
         
-        # Log successful processing
+        # Determine processing status and error message
+        if llm_error:
+            processing_status = "llm_error"
+            error_message = llm_error
+        elif llm_parse_result and llm_parse_result.is_trading_alert:
+            processing_status = "parsed_trading_alert"
+            error_message = "Trade flow orchestrator not implemented yet"
+        elif llm_parse_result:
+            processing_status = "parsed_non_trading"
+            error_message = "Non-trading email - no action required"
+        else:
+            processing_status = "processing"
+            error_message = "Trade flow not implemented yet"
+        
+        # Log successful processing with LLM results
         if sheets_logger:
+            # Add LLM parsing results to alert metadata for logging
+            enhanced_metadata = alert.metadata.copy()
+            if llm_parse_result:
+                enhanced_metadata.update({
+                    'llm_is_trading_alert': llm_parse_result.is_trading_alert,
+                    'llm_trades_count': len(llm_parse_result.trades) if llm_parse_result.trades else 0,
+                    'llm_raw_response': llm_parse_result.raw_response[:500] if llm_parse_result.raw_response else None  # Truncate for logging
+                })
+                if llm_parse_result.trades:
+                    enhanced_metadata['llm_tickers'] = [trade['ticker'] for trade in llm_parse_result.trades]
+                    enhanced_metadata['llm_actions'] = [trade['action'] for trade in llm_parse_result.trades]
+            
+            # Create enhanced alert object with LLM metadata
+            from ..core.models import Alert
+            enhanced_alert = Alert(
+                source=alert.source,
+                content=alert.content,
+                timestamp=alert.timestamp,
+                metadata=enhanced_metadata
+            )
+            
             sheets_logger.log_email_alert(
-                alert=alert,
+                alert=enhanced_alert,
                 raw_data=alert_data,
                 whitelist_status=whitelist_status,
-                processing_status="processing",
-                error_message="Trade flow not implemented yet"
+                processing_status=processing_status,
+                error_message=error_message
             )
         
     except Exception as e:

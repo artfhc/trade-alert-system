@@ -259,3 +259,276 @@ class GoogleSheetsLogger:
         else:
             logger.info(f"Sheet headers would be: {', '.join(self.HEADERS)}")
             return False
+
+
+class LLMParsingLogger:
+    """
+    Dedicated Google Sheets logger for LLM parsing results
+    Logs detailed trade extraction results to a separate worksheet
+    """
+    
+    # LLM-specific headers
+    HEADERS = [
+        "Timestamp",
+        "App Version", 
+        "Message ID",
+        "Email Sender",
+        "Email Subject",
+        "Email Content Preview",
+        "LLM Provider Used",
+        "Is Trading Alert",
+        "Trade Count",
+        "Extracted Tickers",
+        "Extracted Actions", 
+        "Extracted Prices",
+        "Extracted Allocations",
+        "Processing Status",
+        "Error Message",
+        "LLM Raw Response",
+        "Processing Time (ms)"
+    ]
+    
+    def __init__(self, credentials_file: str = None, spreadsheet_id: str = None, worksheet_name: str = "LLMParsingLog"):
+        """
+        Initialize LLM Parsing logger
+        
+        Args:
+            credentials_file: Path to Google service account credentials
+            spreadsheet_id: Google Sheets spreadsheet ID
+            worksheet_name: Name of the worksheet to log to
+        """
+        self.credentials_file = credentials_file
+        self.spreadsheet_id = spreadsheet_id
+        self.worksheet_name = worksheet_name
+        self.sheet = None
+        self.worksheet = None
+        self.version = get_version()
+        
+        if not GSPREAD_AVAILABLE:
+            logger.warning("gspread not available - LLM logging to console only")
+            return
+        
+        if credentials_file and spreadsheet_id:
+            self._setup_sheets_client()
+        else:
+            logger.warning("Google Sheets credentials or spreadsheet ID not provided - LLM logging to console only")
+        
+        logger.info(f"LLMParsingLogger initialized (version: {self.version})")
+    
+    def _setup_sheets_client(self):
+        """Setup Google Sheets client with service account authentication"""
+        try:
+            logger.info(f"Setting up LLM Parsing Logger Sheets client...")
+            logger.info(f"Credentials file: {self.credentials_file}")
+            logger.info(f"Spreadsheet ID: {self.spreadsheet_id}")
+            logger.info(f"Worksheet name: {self.worksheet_name}")
+            
+            # Check if credentials file exists
+            import os
+            if not os.path.exists(self.credentials_file):
+                raise FileNotFoundError(f"Credentials file not found: {self.credentials_file}")
+            
+            # Setup credentials with required scopes
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            
+            logger.info("Loading service account credentials...")
+            creds = Credentials.from_service_account_file(self.credentials_file, scopes=scopes)
+            
+            logger.info("Authorizing gspread client...")
+            client = gspread.authorize(creds)
+            
+            logger.info(f"Opening spreadsheet by key: {self.spreadsheet_id}")
+            # Open the spreadsheet
+            self.sheet = client.open_by_key(self.spreadsheet_id)
+            logger.info(f"Successfully opened spreadsheet: {self.sheet.title}")
+            
+            # Get or create the worksheet
+            try:
+                logger.info(f"Looking for worksheet: {self.worksheet_name}")
+                self.worksheet = self.sheet.worksheet(self.worksheet_name)
+                logger.info(f"Connected to existing worksheet: {self.worksheet_name}")
+            except gspread.WorksheetNotFound:
+                logger.info(f"Worksheet not found, creating: {self.worksheet_name}")
+                self.worksheet = self.sheet.add_worksheet(title=self.worksheet_name, rows=1000, cols=len(self.HEADERS))
+                logger.info(f"Created new worksheet: {self.worksheet_name}")
+            
+            # Setup headers if worksheet is empty
+            logger.info("Ensuring LLM headers are set...")
+            self._ensure_headers()
+            
+            logger.info(f"LLM Parsing Sheets client initialized successfully")
+            
+        except FileNotFoundError as e:
+            logger.error(f"Credentials file error: {e}")
+            self.sheet = None
+            self.worksheet = None
+        except Exception as e:
+            logger.error(f"Failed to setup LLM Parsing Sheets client: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            self.sheet = None
+            self.worksheet = None
+    
+    def _ensure_headers(self):
+        """Ensure the worksheet has proper headers"""
+        try:
+            if not self.worksheet:
+                return
+            
+            # Check if first row has headers
+            first_row = self.worksheet.row_values(1)
+            
+            if not first_row or first_row != self.HEADERS:
+                # Set headers
+                self.worksheet.update('A1', [self.HEADERS])
+                logger.info("LLM headers added to Google Sheets")
+            
+        except Exception as e:
+            logger.warning(f"Could not ensure LLM headers: {e}")
+    
+    def log_llm_parsing_result(self,
+                              alert: Alert = None,
+                              llm_parse_result = None,
+                              llm_provider: str = "unknown",
+                              processing_time_ms: float = 0,
+                              error_message: str = None) -> bool:
+        """
+        Log LLM parsing result to dedicated worksheet
+        
+        Args:
+            alert: Original Alert object
+            llm_parse_result: Result from EmailLLMParser.parse_email()
+            llm_provider: Which LLM was used ("OpenAI", "Anthropic", etc.)
+            processing_time_ms: Time taken for LLM processing
+            error_message: Error details if parsing failed
+            
+        Returns:
+            bool: True if logged successfully
+        """
+        try:
+            # Prepare log entry
+            log_entry = self._prepare_llm_log_entry(
+                alert=alert,
+                llm_parse_result=llm_parse_result,
+                llm_provider=llm_provider,
+                processing_time_ms=processing_time_ms,
+                error_message=error_message
+            )
+            
+            # Try to write to Google Sheets first
+            if self.worksheet:
+                try:
+                    # Prepare row data in the correct order
+                    row_data = [log_entry[header] for header in self.HEADERS]
+                    
+                    # Convert complex objects to JSON strings for sheets
+                    for i, value in enumerate(row_data):
+                        if isinstance(value, (dict, list)):
+                            row_data[i] = json.dumps(value)
+                        elif value is None:
+                            row_data[i] = ""
+                        else:
+                            row_data[i] = str(value)
+                    
+                    # Append to sheets
+                    self.worksheet.append_row(row_data)
+                    logger.info(f"📊 LLM result logged to Google Sheets: {log_entry['Message ID']} - {log_entry['Is Trading Alert']}")
+                    return True
+                    
+                except Exception as e:
+                    logger.error(f"Failed to write LLM log to Google Sheets: {e}")
+                    # Fall through to console logging
+            
+            # Fallback: log to console
+            logger.info("📊 LLM PARSING LOG ENTRY:")
+            for key, value in log_entry.items():
+                if key in ["Email Content Preview", "LLM Raw Response"] and value and len(value) > 150:
+                    logger.info(f"  {key}: {value[:150]}...")
+                else:
+                    logger.info(f"  {key}: {value}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to log LLM parsing result: {e}")
+            return False
+    
+    def _prepare_llm_log_entry(self,
+                              alert: Alert = None,
+                              llm_parse_result = None,
+                              llm_provider: str = "unknown",
+                              processing_time_ms: float = 0,
+                              error_message: str = None) -> Dict[str, Any]:
+        """Prepare LLM log entry data"""
+        
+        # Extract basic data from alert
+        if alert:
+            timestamp = alert.timestamp.isoformat()
+            message_id = alert.metadata.get('message_id', 'unknown')
+            email_sender = alert.metadata.get('sender', '')
+            email_subject = alert.metadata.get('subject', '')
+            email_content_preview = alert.content[:200] + "..." if len(alert.content) > 200 else alert.content
+        else:
+            timestamp = datetime.utcnow().isoformat()
+            message_id = 'unknown'
+            email_sender = 'unknown'
+            email_subject = 'Parse Failed'
+            email_content_preview = 'No content available'
+        
+        # Extract LLM parsing results
+        if llm_parse_result:
+            is_trading_alert = llm_parse_result.is_trading_alert
+            trade_count = len(llm_parse_result.trades) if llm_parse_result.trades else 0
+            
+            # Extract details from trades
+            if llm_parse_result.trades:
+                extracted_tickers = [trade.get('ticker', '') for trade in llm_parse_result.trades]
+                extracted_actions = [trade.get('action', '') for trade in llm_parse_result.trades]
+                extracted_prices = [trade.get('price', '') for trade in llm_parse_result.trades]
+                extracted_allocations = [
+                    trade.get('target_allocation') or trade.get('previous_allocation', '') 
+                    for trade in llm_parse_result.trades
+                ]
+            else:
+                extracted_tickers = []
+                extracted_actions = []
+                extracted_prices = []
+                extracted_allocations = []
+            
+            llm_raw_response = llm_parse_result.raw_response
+            processing_status = "success" if not llm_parse_result.error else "error"
+            
+            if llm_parse_result.error and not error_message:
+                error_message = llm_parse_result.error
+        else:
+            is_trading_alert = False
+            trade_count = 0
+            extracted_tickers = []
+            extracted_actions = []
+            extracted_prices = []
+            extracted_allocations = []
+            llm_raw_response = None
+            processing_status = "error"
+        
+        return {
+            "Timestamp": timestamp,
+            "App Version": self.version,
+            "Message ID": message_id,
+            "Email Sender": email_sender,
+            "Email Subject": email_subject,
+            "Email Content Preview": email_content_preview,
+            "LLM Provider Used": llm_provider,
+            "Is Trading Alert": is_trading_alert,
+            "Trade Count": trade_count,
+            "Extracted Tickers": extracted_tickers,
+            "Extracted Actions": extracted_actions,
+            "Extracted Prices": extracted_prices,
+            "Extracted Allocations": extracted_allocations,
+            "Processing Status": processing_status,
+            "Error Message": error_message or "",
+            "LLM Raw Response": llm_raw_response or "",
+            "Processing Time (ms)": processing_time_ms
+        }

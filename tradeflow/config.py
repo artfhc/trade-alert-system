@@ -97,6 +97,7 @@ ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
 GOOGLE_SHEETS_DOC_ID = os.getenv('GOOGLE_SHEETS_DOC_ID')
 GOOGLE_SHEETS_WORKSHEET = os.getenv('GOOGLE_SHEETS_WORKSHEET', 'TradeLog')
+GOOGLE_SHEETS_LLM_WORKSHEET = os.getenv('GOOGLE_SHEETS_LLM_WORKSHEET', 'LLMParsingLog')
 
 # =============================================================================
 # Web Server Configuration

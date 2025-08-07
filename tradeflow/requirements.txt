@@ -8,9 +8,10 @@ uvicorn[standard]
 # beautifulsoup4
 # aiohttp
 
-# TODO: LLM API clients
-# openai
-# anthropic
+# LLM API clients
+openai>=1.0.0
+anthropic>=0.8.0
+pyyaml>=6.0
 
 # TODO: Trading and financial data
 # alpaca-trade-api
