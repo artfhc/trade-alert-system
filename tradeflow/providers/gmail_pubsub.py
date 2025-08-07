@@ -436,8 +436,20 @@ class GmailPubSubProvider(AlertProvider):
         if not sender or '@' not in sender:
             return False
         
-        # Extract domain from sender email (e.g., "user@txt.voice.google.com")
-        sender_domain = sender.split('@')[-1].lower()
+        # Extract email address from sender (handle formats like "Name" <email@domain.com>)
+        import re
+        email_match = re.search(r'<([^>]+@[^>]+)>', sender)
+        if email_match:
+            email_address = email_match.group(1)
+        else:
+            # Fallback: assume the whole string is an email address
+            email_address = sender
+        
+        # Extract domain from email address
+        if '@' not in email_address:
+            return False
+            
+        sender_domain = email_address.split('@')[-1].lower().strip()
         
         # Check if any whitelisted domain matches
         for allowed_domain in self.domain_whitelist:
