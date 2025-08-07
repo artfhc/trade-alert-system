@@ -232,17 +232,13 @@ async def process_trade_alert(alert_data: Dict[str, Any]):
             whitelist_status = "no_whitelist"
         else:
             # Check sender whitelist if configured
-            sender_ok = True
-            if GMAIL_SENDER_WHITELIST:
-                sender_ok = gmail_provider.validate_sender(sender)
+            sender_ok = not GMAIL_SENDER_WHITELIST or gmail_provider.validate_sender(sender)
             
             # Check domain whitelist if configured  
-            domain_ok = True
-            if GMAIL_DOMAIN_WHITELIST:
-                domain_ok = gmail_provider._is_domain_whitelisted(sender)
+            domain_ok = not GMAIL_DOMAIN_WHITELIST or gmail_provider._is_domain_whitelisted(sender)
             
-            # Allow if both checks pass (or are not configured)
-            if sender_ok and domain_ok:
+            # Allow if EITHER check passes (matching Gmail provider logic)
+            if sender_ok or domain_ok:
                 whitelist_status = "allowed"
             else:
                 whitelist_status = "blocked"
