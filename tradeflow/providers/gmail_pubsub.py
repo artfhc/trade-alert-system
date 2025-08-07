@@ -31,7 +31,7 @@ class GmailPubSubProvider(AlertProvider):
     SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
     
     def __init__(self, credentials_file: str = None, token_file: str = None, 
-                 sender_whitelist: List[str] = None):
+                 sender_whitelist: List[str] = None, domain_whitelist: List[str] = None):
         super().__init__()
         
         if not GOOGLE_AVAILABLE:
@@ -40,6 +40,7 @@ class GmailPubSubProvider(AlertProvider):
         self.credentials_file = credentials_file
         self.token_file = token_file or 'gmail_token.json'
         self.sender_whitelist = sender_whitelist or []
+        self.domain_whitelist = domain_whitelist or []
         self.gmail_service = None
         
         self._setup_gmail_client()
@@ -209,6 +210,13 @@ class GmailPubSubProvider(AlertProvider):
                 if sender != 'unknown' and not any(allowed in sender for allowed in self.sender_whitelist):
                     whitelist_str = ', '.join(self.sender_whitelist)
                     raise ValueError(f"Sender '{sender}' not in whitelist. Allowed senders: {whitelist_str}")
+            
+            # Validate sender domain if domain whitelist is configured
+            if self.domain_whitelist:
+                sender = metadata.get('sender', '')
+                if sender != 'unknown' and not self._is_domain_whitelisted(sender):
+                    domain_str = ', '.join(self.domain_whitelist)
+                    raise ValueError(f"Sender domain for '{sender}' not in whitelist. Allowed domains: {domain_str}")
             
             alert = Alert(
                 source=self.get_source_name(),
@@ -417,6 +425,23 @@ class GmailPubSubProvider(AlertProvider):
         
         text = f"{subject} {content}".lower()
         return any(keyword.lower() in text for keyword in keywords)
+    
+    def _is_domain_whitelisted(self, sender: str) -> bool:
+        """Check if sender domain is in the whitelist"""
+        if not sender or '@' not in sender:
+            return False
+        
+        # Extract domain from sender email (e.g., "user@txt.voice.google.com")
+        sender_domain = sender.split('@')[-1].lower()
+        
+        # Check if any whitelisted domain matches
+        for allowed_domain in self.domain_whitelist:
+            allowed_domain = allowed_domain.lower().strip()
+            # Support wildcard subdomains (e.g., txt.voice.google.com matches abc.txt.voice.google.com)
+            if sender_domain == allowed_domain or sender_domain.endswith('.' + allowed_domain):
+                return True
+        
+        return False
 
 
 # Register the provider

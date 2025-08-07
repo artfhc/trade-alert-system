@@ -20,7 +20,7 @@ from ..parsers.email_llm import EmailLLMParser
 from ..version import get_version
 from ..config import (
     HOST, PORT, DEBUG, ENVIRONMENT,
-    GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST,
+    GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST, GMAIL_DOMAIN_WHITELIST,
     WEBHOOK_SECRET, GOOGLE_CREDENTIALS_FILE, GOOGLE_SHEETS_DOC_ID, 
     GOOGLE_SHEETS_WORKSHEET, GOOGLE_SHEETS_LLM_WORKSHEET
 )
@@ -56,7 +56,8 @@ async def startup_event():
         gmail_provider = GmailPubSubProvider(
             credentials_file=GMAIL_CREDENTIALS_FILE,
             token_file=GMAIL_TOKEN_FILE,
-            sender_whitelist=GMAIL_SENDER_WHITELIST
+            sender_whitelist=GMAIL_SENDER_WHITELIST,
+            domain_whitelist=GMAIL_DOMAIN_WHITELIST
         )
         logger.info("✅ Gmail provider initialized")
         
@@ -227,12 +228,24 @@ async def process_trade_alert(alert_data: Dict[str, Any]):
         
         # Determine whitelist status
         sender = alert.metadata.get('sender', '')
-        if not GMAIL_SENDER_WHITELIST:
+        if not GMAIL_SENDER_WHITELIST and not GMAIL_DOMAIN_WHITELIST:
             whitelist_status = "no_whitelist"
-        elif gmail_provider.validate_sender(sender):
-            whitelist_status = "allowed"
         else:
-            whitelist_status = "blocked"
+            # Check sender whitelist if configured
+            sender_ok = True
+            if GMAIL_SENDER_WHITELIST:
+                sender_ok = gmail_provider.validate_sender(sender)
+            
+            # Check domain whitelist if configured  
+            domain_ok = True
+            if GMAIL_DOMAIN_WHITELIST:
+                domain_ok = gmail_provider._is_domain_whitelisted(sender)
+            
+            # Allow if both checks pass (or are not configured)
+            if sender_ok and domain_ok:
+                whitelist_status = "allowed"
+            else:
+                whitelist_status = "blocked"
         
         # Log the parsed alert with whitelist status
         if sheets_logger:

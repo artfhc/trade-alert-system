@@ -70,6 +70,7 @@ PUBSUB_WEBHOOK_SUBSCRIPTION = os.getenv('PUBSUB_WEBHOOK_SUBSCRIPTION', 'gmail-we
 # =============================================================================
 
 GMAIL_SENDER_WHITELIST = os.getenv('GMAIL_SENDER_WHITELIST', '').split(',') if os.getenv('GMAIL_SENDER_WHITELIST') else []
+GMAIL_DOMAIN_WHITELIST = os.getenv('GMAIL_DOMAIN_WHITELIST', 'txt.voice.google.com').split(',') if os.getenv('GMAIL_DOMAIN_WHITELIST') else ['txt.voice.google.com']
 GMAIL_ALERT_KEYWORDS = os.getenv('GMAIL_ALERT_KEYWORDS', 'trade,alert,buy,sell,position').split(',')
 GMAIL_LABEL_FILTER = os.getenv('GMAIL_LABEL_FILTER', 'INBOX')
 
