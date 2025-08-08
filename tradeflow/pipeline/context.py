@@ -72,8 +72,9 @@ class ProcessingContext:
     
     def should_continue_processing(self) -> bool:
         """Determine if pipeline should continue processing"""
-        # Continue if no errors and not explicitly stopped
-        return not self.has_error() and self.processing_status not in ["blocked", "completed"]
+        # Continue if not explicitly stopped or blocked
+        # Allow processing to continue even with non-critical errors
+        return self.processing_status not in ["blocked", "completed"]
     
     def get_summary(self) -> Dict[str, Any]:
         """Get summary information for logging"""

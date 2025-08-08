@@ -113,49 +113,111 @@ class ParseAlertHandler(Handler):
         
         This creates a minimal Alert object from the Pub/Sub message data,
         allowing the pipeline to continue processing even without Gmail API access.
+        This method should never fail - it will create an alert with whatever data is available.
         """
         from datetime import datetime
         from ..core.models import Alert
         import base64
+        import binascii
         import json
         
-        message = raw_data.get('message', {})
-        message_id = message.get('messageId', 'unknown')
+        # Safely extract message data with defaults
+        try:
+            message = raw_data.get('message', {})
+        except (AttributeError, TypeError):
+            # raw_data is not a dict or is None
+            message = {}
+        
+        message_id = message.get('messageId', f'pubsub_{int(datetime.utcnow().timestamp())}')
         publish_time = message.get('publishTime', datetime.utcnow().isoformat())
         
-        # Try to decode the base64 data
-        email_content = "Unable to decode email content"
+        # Try to decode the base64 data - with multiple fallback strategies
+        email_content = "No email content available"
+        parsing_notes = []
+        
         try:
-            if 'data' in message:
-                decoded_data = base64.b64decode(message['data']).decode('utf-8')
-                # The decoded data might be JSON or raw email content
+            if 'data' in message and message['data']:
+                # Try to decode base64
                 try:
+                    decoded_data = base64.b64decode(message['data']).decode('utf-8')
+                    parsing_notes.append("Successfully decoded base64 data")
+                    
                     # Try parsing as JSON first (Gmail API format)
-                    email_data = json.loads(decoded_data)
-                    email_content = email_data.get('snippet', email_data.get('body', decoded_data))
-                except json.JSONDecodeError:
-                    # Treat as raw email content
-                    email_content = decoded_data
+                    try:
+                        email_data = json.loads(decoded_data)
+                        email_content = email_data.get('snippet', email_data.get('body', email_data.get('content', decoded_data)))
+                        parsing_notes.append("Parsed as JSON format")
+                    except json.JSONDecodeError:
+                        # Treat as raw email content
+                        email_content = decoded_data
+                        parsing_notes.append("Treated as raw email content")
+                        
+                except (binascii.Error, UnicodeDecodeError, TypeError) as e:
+                    parsing_notes.append(f"Base64 decode failed: {e}")
+                    # Try to use data as-is if it's a string
+                    if isinstance(message.get('data'), str):
+                        email_content = message['data']
+                        parsing_notes.append("Using raw data as fallback")
+                        
+            elif 'attributes' in message:
+                # Sometimes the content is in attributes
+                attributes = message.get('attributes', {})
+                email_content = attributes.get('content', attributes.get('body', str(attributes)))
+                parsing_notes.append("Extracted from message attributes")
+                
+            else:
+                # Last resort - use the entire message as content
+                email_content = f"Raw Pub/Sub message: {json.dumps(raw_data, indent=2)}"
+                parsing_notes.append("Using entire message as fallback content")
+                
         except Exception as e:
-            logger.warning(f"Could not decode Pub/Sub message data: {e}")
+            parsing_notes.append(f"All parsing attempts failed: {e}")
+            email_content = f"Parsing error - Raw data: {str(raw_data)[:200]}..."
         
-        # Create basic alert with available information
-        alert = Alert(
-            source="gmail_pubsub_basic",
-            content=email_content,
-            timestamp=datetime.utcnow(),
-            metadata={
-                'message_id': message_id,
-                'publish_time': publish_time,
-                'sender': 'unknown',
-                'subject': 'Gmail API Not Available',
-                'parsing_method': 'basic_pubsub',
-                'note': 'Parsed without Gmail API access - limited metadata available'
-            }
-        )
+        # Ensure we have some content to work with
+        if not email_content or email_content.strip() == "":
+            email_content = f"Empty content - Message ID: {message_id}"
         
-        logger.info(f"📧 Created basic alert from Pub/Sub message: {message_id}")
-        return alert
+        # Create basic alert with available information - this should never fail
+        try:
+            alert = Alert(
+                source="gmail_pubsub_basic",
+                content=email_content,
+                timestamp=datetime.utcnow(),
+                metadata={
+                    'message_id': message_id,
+                    'publish_time': publish_time,
+                    'sender': 'unknown',
+                    'subject': 'Parsed via Basic Pub/Sub',
+                    'parsing_method': 'basic_pubsub',
+                    'parsing_notes': parsing_notes,
+                    'raw_data_type': str(type(raw_data)),
+                    'note': 'Parsed without Gmail API access - limited metadata available'
+                }
+            )
+            
+            logger.info(f"📧 Created basic alert from Pub/Sub message: {message_id}")
+            logger.info(f"📝 Content length: {len(email_content)} chars")
+            logger.info(f"🔍 Parsing notes: {'; '.join(parsing_notes)}")
+            return alert
+            
+        except Exception as e:
+            # Last resort - create minimal alert that should always work
+            logger.error(f"Failed to create Alert object: {e}")
+            
+            minimal_alert = Alert(
+                source="gmail_pubsub_minimal",
+                content=f"Alert creation failed: {str(e)}",
+                timestamp=datetime.utcnow(),
+                metadata={
+                    'message_id': 'error',
+                    'error': str(e),
+                    'raw_data_summary': str(raw_data)[:100]
+                }
+            )
+            
+            logger.warning("📧 Created minimal emergency alert")
+            return minimal_alert
 
 
 class ValidateWhitelistHandler(Handler):
@@ -234,7 +296,11 @@ class LLMAnalysisHandler(Handler):
             
             # Set processing status based on results
             if llm_parse_result.error:
-                context.set_error(f"LLM parsing failed: {llm_parse_result.error}", "llm_error")
+                # Don't set error state for LLM failures - still want to log the attempt
+                context.processing_status = "llm_error"
+                # Store error message but don't use set_error() which blocks further processing
+                if not context.error_message:  # Don't overwrite previous errors
+                    context.error_message = f"LLM parsing failed: {llm_parse_result.error}"
                 logger.error(f"❌ LLM parsing failed: {llm_parse_result.error}")
             elif llm_parse_result.is_trading_alert:
                 context.processing_status = "parsed_trading_alert"
