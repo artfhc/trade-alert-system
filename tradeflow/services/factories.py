@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 def create_gmail_provider(config: ServiceConfig) -> Optional[GmailPubSubProvider]:
     """Create Gmail Pub/Sub provider instance"""
     try:
+        # Check if Gmail credentials are available
+        if not config.gmail_credentials_file or not config.gmail_token_file:
+            logger.warning("Gmail credentials not configured - Gmail provider will not be available")
+            logger.warning("Set GMAIL_CREDENTIALS_FILE and GMAIL_TOKEN_FILE environment variables")
+            return None
+        
+        # Check if credential files exist
+        import os
+        if not os.path.exists(config.gmail_credentials_file):
+            logger.error(f"Gmail credentials file not found: {config.gmail_credentials_file}")
+            return None
+            
+        if not os.path.exists(config.gmail_token_file):
+            logger.error(f"Gmail token file not found: {config.gmail_token_file}")
+            return None
+        
         provider = GmailPubSubProvider(
             credentials_file=config.gmail_credentials_file,
             token_file=config.gmail_token_file,
@@ -30,7 +46,8 @@ def create_gmail_provider(config: ServiceConfig) -> Optional[GmailPubSubProvider
         return provider
     except Exception as e:
         logger.error(f"Failed to create Gmail provider: {e}")
-        raise
+        logger.error("Gmail provider will not be available - email parsing may fail")
+        return None
 
 
 def create_sheets_logger(config: ServiceConfig) -> Optional[GoogleSheetsLogger]:

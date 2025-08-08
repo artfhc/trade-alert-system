@@ -87,13 +87,15 @@ class ParseAlertHandler(Handler):
     """
     
     def process(self, context: ProcessingContext) -> None:
-        gmail_provider = self.container.get("gmail_provider")
+        gmail_provider = self.container.get_optional("gmail_provider")
         
         if not gmail_provider:
-            raise ValueError("Gmail provider not available")
-        
-        # Parse the alert
-        alert = gmail_provider.parse_alert(context.raw_data)
+            # Gmail provider not available - try to extract basic info from Pub/Sub message
+            logger.warning("⚠️ Gmail provider not available - attempting basic Pub/Sub parsing")
+            alert = self._parse_pubsub_message_basic(context.raw_data)
+        else:
+            # Use Gmail provider for full parsing
+            alert = gmail_provider.parse_alert(context.raw_data)
         
         # Update context
         context.alert = alert
@@ -104,6 +106,56 @@ class ParseAlertHandler(Handler):
         
         logger.info(f"📧 Alert parsed from {context.sender}")
         logger.info(f"📝 Content preview: {alert.content[:100]}...")
+    
+    def _parse_pubsub_message_basic(self, raw_data: dict) -> 'Alert':
+        """
+        Basic parsing of Pub/Sub message when Gmail provider is not available
+        
+        This creates a minimal Alert object from the Pub/Sub message data,
+        allowing the pipeline to continue processing even without Gmail API access.
+        """
+        from datetime import datetime
+        from ..core.models import Alert
+        import base64
+        import json
+        
+        message = raw_data.get('message', {})
+        message_id = message.get('messageId', 'unknown')
+        publish_time = message.get('publishTime', datetime.utcnow().isoformat())
+        
+        # Try to decode the base64 data
+        email_content = "Unable to decode email content"
+        try:
+            if 'data' in message:
+                decoded_data = base64.b64decode(message['data']).decode('utf-8')
+                # The decoded data might be JSON or raw email content
+                try:
+                    # Try parsing as JSON first (Gmail API format)
+                    email_data = json.loads(decoded_data)
+                    email_content = email_data.get('snippet', email_data.get('body', decoded_data))
+                except json.JSONDecodeError:
+                    # Treat as raw email content
+                    email_content = decoded_data
+        except Exception as e:
+            logger.warning(f"Could not decode Pub/Sub message data: {e}")
+        
+        # Create basic alert with available information
+        alert = Alert(
+            source="gmail_pubsub_basic",
+            content=email_content,
+            timestamp=datetime.utcnow(),
+            metadata={
+                'message_id': message_id,
+                'publish_time': publish_time,
+                'sender': 'unknown',
+                'subject': 'Gmail API Not Available',
+                'parsing_method': 'basic_pubsub',
+                'note': 'Parsed without Gmail API access - limited metadata available'
+            }
+        )
+        
+        logger.info(f"📧 Created basic alert from Pub/Sub message: {message_id}")
+        return alert
 
 
 class ValidateWhitelistHandler(Handler):
