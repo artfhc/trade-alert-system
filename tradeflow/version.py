@@ -2,7 +2,7 @@
 Application version management
 """
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 
 def get_version() -> str:
     """Get the current application version"""

@@ -1,52 +1,35 @@
+#!/usr/bin/env python3
 """
-Entry point (webhook handler) for the trade alert system
+Entry point for the trade alert system - Service Layer Architecture
+
+This replaces the TODO-based placeholder with a clean implementation using
+the new service layer architecture with dependency injection and pipeline processing.
 """
 
-# TODO: Implement main application entry point:
-#   - Initialize FastAPI app from web.server
-#   - Set up dependency injection for services
-#   - Configure logging and monitoring
-#   - Handle application startup and shutdown
+import sys
+import os
+import logging
+from pathlib import Path
 
-# TODO: Initialize core services:
-#   - Create TradeFlow orchestrator instance
-#   - Set up AlertProvider (GmailPubSubProvider)
-#   - Initialize LLM email parser
-#   - Set up Alpaca client and position sizer
-#   - Initialize Google Sheets logger
+# Add the project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-# TODO: Configure service dependencies:
-#   - Inject dependencies into orchestrator
-#   - Set up service health checks
-#   - Configure retry policies
-#   - Set up circuit breakers for external services
+def main():
+    """Main function - starts the service layer architecture server by default"""
+    print("🚀 Trade Alert System - Service Layer Architecture")
+    print("=" * 60)
+    
+    print("Starting server with new architecture...")
+    print("  ✅ Dependency injection container")
+    print("  ✅ Pipeline processing")
+    print("  ✅ Service health monitoring") 
+    print("  ✅ Clean separation of concerns")
+    print()
+    
+    # Import and run the server
+    from tradeflow.web.server import run_server
+    run_server()
 
-# TODO: Implement application lifecycle:
-#   - Startup validation (check API keys, connections)
-#   - Graceful shutdown handling
-#   - Resource cleanup on exit
-#   - Health check endpoints
-
-# TODO: Add monitoring and observability:
-#   - Application metrics collection
-#   - Error tracking and alerting
-#   - Performance monitoring
-#   - Request/response logging
-
-# TODO: Configure environment-specific settings:
-#   - Load configuration from environment variables
-#   - Handle dev/staging/production differences
-#   - Validate required configuration
-#   - Set up secrets management
-
-# TODO: Implement CLI interface (optional):
-#   - Add command-line arguments for different modes
-#   - Support for dry-run mode
-#   - Manual trade execution
-#   - System diagnostics commands
-
-# TODO: Add deployment readiness:
-#   - Container health checks
-#   - Graceful SIGTERM handling
-#   - Ready/live probe endpoints
-#   - Configuration validation on startup
+if __name__ == "__main__":
+    main()

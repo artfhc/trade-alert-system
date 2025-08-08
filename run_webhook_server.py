@@ -2,7 +2,7 @@
 """
 Trade Alert Webhook Server Startup Script
 
-This script starts the FastAPI webhook server that handles Gmail Pub/Sub notifications.
+This script starts the FastAPI webhook server with service layer architecture.
 """
 
 import sys
@@ -19,8 +19,8 @@ from tradeflow.config import validate_config, HOST, PORT, DEBUG, ENVIRONMENT
 
 def main():
     """Main function to start the webhook server"""
-    print("🚀 Trade Alert Webhook Server")
-    print("=" * 50)
+    print("🚀 Trade Alert Webhook Server - Service Layer Architecture")
+    print("=" * 60)
     
     try:
         # Validate configuration
@@ -34,22 +34,33 @@ def main():
         print()
         
         print("📋 Available endpoints:")
-        print(f"  • GET  /health       - Health check")
-        print(f"  • GET  /status       - System status")
+        print(f"  • GET  /              - API information")
+        print(f"  • GET  /health        - Health check")
+        print(f"  • GET  /services      - Service container status")
         print(f"  • POST /webhook/gmail - Gmail Pub/Sub webhook")
         print(f"  • POST /manual-trade  - Manual trade testing")
+        print()
+        
+        print("🏗️  Architecture Features:")
+        print("  ✅ Dependency injection container")
+        print("  ✅ Pipeline processing with discrete handlers")
+        print("  ✅ Service health monitoring")
+        print("  ✅ Comprehensive error handling")
+        print("  ✅ Easy unit testing support")
+        print("  ✅ Clean separation of concerns")
         print()
         
         if DEBUG:
             print("🔍 Debug mode enabled - server will auto-reload on code changes")
             print("📖 API docs available at: http://localhost:8000/docs")
+            print("🔍 Service status: http://localhost:8000/services")
             print()
         
         print("🎯 Ready to receive Gmail notifications!")
         print("📧 Make sure your Gmail watch is set up and Pub/Sub is configured")
         print()
         print("Press Ctrl+C to stop the server")
-        print("=" * 50)
+        print("=" * 60)
         
         # Start the server
         run_server()

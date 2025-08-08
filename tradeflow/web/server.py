@@ -1,29 +1,25 @@
 """
-FastAPI webhook server for handling Gmail Pub/Sub notifications
+FastAPI webhook server - Service Layer Architecture (v2)
+
+Clean implementation replacing the monolithic server.py with proper
+separation of concerns, dependency injection, and pipeline processing.
 """
 
 import json
 import logging
-import asyncio
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 
-from ..providers.gmail_pubsub import GmailPubSubProvider
-from ..logging.google_sheets import GoogleSheetsLogger, LLMParsingLogger
-from ..parsers.email_llm import EmailLLMParser
+from ..services import ServiceContainer, create_service_container
+from ..pipeline import ProcessingPipeline, create_default_pipeline
 from ..version import get_version
-from ..config import (
-    HOST, PORT, DEBUG, ENVIRONMENT,
-    GMAIL_CREDENTIALS_FILE, GMAIL_TOKEN_FILE, GMAIL_SENDER_WHITELIST, GMAIL_DOMAIN_WHITELIST,
-    WEBHOOK_SECRET, GOOGLE_CREDENTIALS_FILE, GOOGLE_SHEETS_DOC_ID, 
-    GOOGLE_SHEETS_WORKSHEET, GOOGLE_SHEETS_LLM_WORKSHEET
-)
+from ..config import HOST, PORT, DEBUG, ENVIRONMENT
 
 # Configure logging
 logging.basicConfig(
@@ -32,70 +28,80 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global variables for providers
-gmail_provider: Optional[GmailPubSubProvider] = None
-sheets_logger: Optional[GoogleSheetsLogger] = None
-llm_logger: Optional[LLMParsingLogger] = None
-email_parser: Optional[EmailLLMParser] = None
+# Global service container (initialized on startup)
+service_container: Optional[ServiceContainer] = None
+processing_pipeline: Optional[ProcessingPipeline] = None
+
+
+# Dependency injection for FastAPI
+def get_service_container() -> ServiceContainer:
+    """FastAPI dependency for service container"""
+    if service_container is None:
+        raise HTTPException(status_code=503, detail="Service container not initialized")
+    return service_container
+
+
+def get_processing_pipeline() -> ProcessingPipeline:
+    """FastAPI dependency for processing pipeline"""
+    if processing_pipeline is None:
+        raise HTTPException(status_code=503, detail="Processing pipeline not initialized")
+    return processing_pipeline
+
 
 # Create FastAPI application
 app = FastAPI(
     title="Trade Alert Webhook Server",
-    description="Webhook server for processing Gmail Pub/Sub trade alerts",
-    version="1.0.0"
+    description="Service layer architecture for processing Gmail Pub/Sub trade alerts",
+    version=get_version()
 )
+
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event"""
-    logger.info(f"🚀 Starting Trade Alert Webhook Server v{get_version()}")
-    global gmail_provider, sheets_logger, llm_logger, email_parser
+    """Application startup - initialize services"""
+    global service_container, processing_pipeline
+    
+    logger.info(f"🚀 Starting Trade Alert Webhook Server - v{get_version()}")
     
     try:
-        # Initialize Gmail provider
-        gmail_provider = GmailPubSubProvider(
-            credentials_file=GMAIL_CREDENTIALS_FILE,
-            token_file=GMAIL_TOKEN_FILE,
-            sender_whitelist=GMAIL_SENDER_WHITELIST,
-            domain_whitelist=GMAIL_DOMAIN_WHITELIST
-        )
-        logger.info("✅ Gmail provider initialized")
+        # Initialize service container
+        service_container = create_service_container()
+        logger.info("✅ Service container initialized")
         
-        # Initialize Google Sheets logger
-        sheets_logger = GoogleSheetsLogger(
-            credentials_file=GOOGLE_CREDENTIALS_FILE,
-            spreadsheet_id=GOOGLE_SHEETS_DOC_ID,
-            worksheet_name=GOOGLE_SHEETS_WORKSHEET
-        )
-        logger.info("✅ Google Sheets logger initialized")
+        # Validate service health
+        health_status = service_container.health_check()
+        healthy_services = [name for name, status in health_status.items() if status]
+        unhealthy_services = [name for name, status in health_status.items() if not status]
         
-        # Initialize LLM Parsing logger
-        llm_logger = LLMParsingLogger(
-            credentials_file=GOOGLE_CREDENTIALS_FILE,
-            spreadsheet_id=GOOGLE_SHEETS_DOC_ID,
-            worksheet_name=GOOGLE_SHEETS_LLM_WORKSHEET
-        )
-        logger.info("✅ LLM Parsing logger initialized")
+        logger.info(f"✅ Healthy services: {', '.join(healthy_services) if healthy_services else 'None'}")
+        if unhealthy_services:
+            logger.warning(f"⚠️ Unhealthy services: {', '.join(unhealthy_services)}")
         
-        # Initialize Email LLM Parser
-        try:
-            email_parser = EmailLLMParser()
-            logger.info("✅ Email LLM Parser initialized")
-        except Exception as parser_error:
-            logger.warning(f"⚠️ Email LLM Parser initialization failed: {parser_error}")
-            logger.warning("📝 Emails will be processed without LLM parsing")
-            email_parser = None
+        # Initialize processing pipeline
+        processing_pipeline = create_default_pipeline(service_container)
+        logger.info("✅ Processing pipeline initialized")
         
-        logger.info("⚠️  Trade flow orchestrator not implemented yet - will log alerts with LLM parsing")
+        logger.info("🎯 Server startup completed successfully")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         raise
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Application shutdown event"""
+    """Application shutdown - cleanup resources"""
+    global service_container, processing_pipeline
+    
     logger.info("🛑 Shutting down Trade Alert Webhook Server")
+    
+    if service_container:
+        service_container.shutdown()
+        service_container = None
+    
+    processing_pipeline = None
+    logger.info("✅ Shutdown completed")
+
 
 # Configure CORS
 app.add_middleware(
@@ -109,6 +115,7 @@ app.add_middleware(
 # Add trusted host middleware for production
 if ENVIRONMENT == "production":
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
 
 # Request logging middleware
 @app.middleware("http")
@@ -126,24 +133,28 @@ async def log_requests(request: Request, call_next):
     
     return response
 
+
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
     return {
         "service": "Trade Alert Webhook Server",
         "version": get_version(),
+        "architecture": "service_layer",
         "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
         "endpoints": {
             "health": "/health",
-            "status": "/status", 
+            "status": "/status",
+            "services": "/services",
             "gmail_webhook": "/webhook/gmail",
             "manual_trade": "/manual-trade",
             "api_docs": "/docs",
             "openapi": "/openapi.json"
         },
-        "description": "Automated trading system webhook for Gmail Pub/Sub notifications"
+        "description": "Clean service layer architecture with dependency injection and pipeline processing"
     }
+
 
 @app.get("/health")
 async def health_check():
@@ -152,298 +163,81 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "service": "trade-alert-webhook",
-        "version": get_version()
+        "version": get_version(),
+        "architecture": "service_layer"
     }
 
-@app.get("/status")
-async def system_status():
-    """System status endpoint"""
-    gmail_status = "connected" if gmail_provider and gmail_provider.gmail_service else "disconnected"
-    gmail_auth_note = ""
-    
-    if gmail_provider and not gmail_provider.gmail_service:
-        gmail_auth_note = "Gmail authentication required for full functionality"
-    
-    # Check Email LLM Parser status
-    llm_parser_status = "available" if email_parser else "not_available"
-    llm_parser_note = ""
-    
-    if not email_parser:
-        llm_parser_note = "Email LLM Parser not initialized - requires OPENAI_API_KEY or ANTHROPIC_API_KEY"
-    else:
-        # Check which LLM clients are available
-        clients = []
-        if hasattr(email_parser, 'openai_client') and email_parser.openai_client:
-            clients.append("OpenAI")
-        if hasattr(email_parser, 'anthropic_client') and email_parser.anthropic_client:
-            clients.append("Anthropic")
-        
-        if clients:
-            llm_parser_note = f"Available LLM clients: {', '.join(clients)}"
-        else:
-            llm_parser_note = "No LLM clients available"
+
+@app.get("/services")
+async def service_status(container: ServiceContainer = Depends(get_service_container)):
+    """Service status and health check endpoint"""
+    health_status = container.health_check()
+    service_info = container.get_service_info()
     
     return {
-        "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
-        "services": {
-            "gmail_provider": gmail_status,
-            "gmail_note": gmail_auth_note,
-            "email_llm_parser": llm_parser_status,
-            "llm_parser_note": llm_parser_note,
-            "trade_flow": "not_implemented"
+        "service_container": {
+            "registered_services": service_info['registered_services'],
+            "active_services": service_info['active_services'],
+            "health_status": health_status
         },
-        "environment": ENVIRONMENT,
-        "debug": DEBUG,
+        "overall_health": all(health_status.values()) if health_status else False,
+        "architecture": "service_layer",
         "notes": [
-            "Webhook server is running and can receive Pub/Sub notifications",
-            "Gmail authentication is optional for basic webhook functionality",
-            "Email LLM Parser provides intelligent trade alert classification",
-            "Trade flow orchestrator not implemented yet"
+            "Service layer architecture with dependency injection",
+            "Pipeline processing with discrete handlers",
+            "Comprehensive health monitoring and error handling"
         ]
     }
 
-async def process_trade_alert(alert_data: Dict[str, Any]):
-    """Background task to process trade alert"""
-    alert = None
-    whitelist_status = "unknown"
+
+async def process_trade_alert_pipeline(
+    raw_data: Dict[str, Any],
+    pipeline: ProcessingPipeline
+) -> None:
+    """
+    Process trade alert using the new pipeline architecture
     
+    Replaces the monolithic 200+ line process_trade_alert() function
+    with clean pipeline processing.
+    """
     try:
-        logger.info("🔄 Processing trade alert in background")
+        logger.info("🔄 Processing trade alert with pipeline architecture")
         
-        if not gmail_provider:
-            if sheets_logger:
-                sheets_logger.log_email_alert(
-                    alert=None,
-                    raw_data=alert_data,
-                    whitelist_status="unknown",
-                    processing_status="error",
-                    error_message="Gmail provider not initialized in background task"
-                )
-            raise ValueError("Gmail provider not initialized")
+        # Process through pipeline
+        context = await pipeline.process(raw_data)
         
-        # Parse the alert
-        alert = gmail_provider.parse_alert(alert_data)
-        logger.info(f"✅ Alert parsed: {alert.content[:100]}...")
-        
-        # Determine whitelist status
-        sender = alert.metadata.get('sender', '')
-        if not GMAIL_SENDER_WHITELIST and not GMAIL_DOMAIN_WHITELIST:
-            whitelist_status = "no_whitelist"
+        # Log final result
+        if context.is_successful():
+            logger.info("✅ Trade alert processed successfully")
         else:
-            # Check sender whitelist if configured
-            sender_ok = not GMAIL_SENDER_WHITELIST or gmail_provider.validate_sender(sender)
-            
-            # Check domain whitelist if configured  
-            domain_ok = not GMAIL_DOMAIN_WHITELIST or gmail_provider._is_domain_whitelisted(sender)
-            
-            # Allow if EITHER check passes (matching Gmail provider logic)
-            if sender_ok or domain_ok:
-                whitelist_status = "allowed"
-            else:
-                whitelist_status = "blocked"
-        
-        # Log the parsed alert with whitelist status
-        if sheets_logger:
-            sheets_logger.log_email_alert(
-                alert=alert,
-                raw_data=alert_data,
-                whitelist_status=whitelist_status,
-                processing_status="parsed",
-                error_message=None
-            )
-        
-        # Check if sender is whitelisted (if whitelist is configured)
-        if whitelist_status == "blocked":
-            logger.warning(f"🚫 Sender {sender} not in whitelist - skipping processing")
-            if sheets_logger:
-                sheets_logger.log_email_alert(
-                    alert=alert,
-                    raw_data=alert_data,
-                    whitelist_status=whitelist_status,
-                    processing_status="blocked",
-                    error_message=f"Sender '{sender}' not in configured whitelist"
-                )
-            return
-        
-        # Process with Email LLM Parser
-        llm_parse_result = None
-        llm_error = None
-        llm_provider = "none"
-        processing_time_ms = 0
-        
-        if email_parser:
-            try:
-                logger.info("🧠 Processing email with LLM Parser")
-                
-                # Track processing time
-                import time
-                start_time = time.time()
-                
-                llm_parse_result = email_parser.parse_email(alert.content)
-                
-                # Calculate processing time
-                processing_time_ms = (time.time() - start_time) * 1000
-                
-                # Determine which LLM provider was used
-                if llm_parse_result.raw_response:
-                    if hasattr(email_parser, 'anthropic_client') and email_parser.anthropic_client:
-                        llm_provider = "Anthropic"
-                    elif hasattr(email_parser, 'openai_client') and email_parser.openai_client:
-                        llm_provider = "OpenAI"
-                else:
-                    llm_provider = "failed"
-                
-                if llm_parse_result.error:
-                    llm_error = f"LLM parsing failed: {llm_parse_result.error}"
-                    logger.error(f"❌ {llm_error}")
-                else:
-                    logger.info(f"✅ LLM Classification: {'Trading Alert' if llm_parse_result.is_trading_alert else 'Non-Trading Email'}")
-                    logger.info(f"⏱️  Processing Time: {processing_time_ms:.1f}ms with {llm_provider}")
-                    
-                    if llm_parse_result.is_trading_alert and llm_parse_result.trades:
-                        logger.info(f"📈 Found {len(llm_parse_result.trades)} trade(s):")
-                        for i, trade in enumerate(llm_parse_result.trades, 1):
-                            logger.info(f"  {i}. {trade['ticker']}: {trade['action']}")
-                            if trade.get('price'):
-                                logger.info(f"     Price: ${trade['price']}")
-                            if trade.get('target_allocation'):
-                                logger.info(f"     Target Allocation: {trade['target_allocation']}")
-                    else:
-                        logger.info("📧 Email classified as non-trading content")
-                
-                # Log LLM parsing result to dedicated worksheet
-                if llm_logger:
-                    llm_logger.log_llm_parsing_result(
-                        alert=alert,
-                        llm_parse_result=llm_parse_result,
-                        llm_provider=llm_provider,
-                        processing_time_ms=processing_time_ms,
-                        error_message=llm_error
-                    )
-                        
-            except Exception as e:
-                llm_error = f"LLM parsing exception: {str(e)}"
-                logger.error(f"❌ {llm_error}")
-                
-                # Log the exception to LLM logger
-                if llm_logger:
-                    llm_logger.log_llm_parsing_result(
-                        alert=alert,
-                        llm_parse_result=None,
-                        llm_provider="error",
-                        processing_time_ms=processing_time_ms,
-                        error_message=llm_error
-                    )
-        else:
-            llm_error = "Email LLM Parser not available"
-            logger.warning("⚠️ Email LLM Parser not initialized - skipping LLM processing")
-            
-            # Log that LLM parser is not available
-            if llm_logger:
-                llm_logger.log_llm_parsing_result(
-                    alert=alert,
-                    llm_parse_result=None,
-                    llm_provider="not_available",
-                    processing_time_ms=0,
-                    error_message=llm_error
-                )
-        
-        # TODO: Process with trade flow orchestrator (not implemented yet)
-        logger.info("📝 Alert received and parsed successfully")
-        logger.info(f"📧 From: {alert.metadata.get('sender', 'unknown')}")
-        logger.info(f"📃 Subject: {alert.metadata.get('subject', 'unknown')}")
-        logger.info(f"🔒 Whitelist Status: {whitelist_status}")
-        logger.warning("⚠️ Trade flow orchestrator not implemented yet - alert logged only")
-        
-        # Determine processing status and error message
-        if llm_error:
-            processing_status = "llm_error"
-            error_message = llm_error
-        elif llm_parse_result and llm_parse_result.is_trading_alert:
-            processing_status = "parsed_trading_alert"
-            error_message = "Trade flow orchestrator not implemented yet"
-        elif llm_parse_result:
-            processing_status = "parsed_non_trading"
-            error_message = "Non-trading email - no action required"
-        else:
-            processing_status = "processing"
-            error_message = "Trade flow not implemented yet"
-        
-        # Log successful processing with LLM results
-        if sheets_logger:
-            # Add LLM parsing results to alert metadata for logging
-            enhanced_metadata = alert.metadata.copy()
-            if llm_parse_result:
-                enhanced_metadata.update({
-                    'llm_is_trading_alert': llm_parse_result.is_trading_alert,
-                    'llm_trades_count': len(llm_parse_result.trades) if llm_parse_result.trades else 0,
-                    'llm_raw_response': llm_parse_result.raw_response[:500] if llm_parse_result.raw_response else None  # Truncate for logging
-                })
-                if llm_parse_result.trades:
-                    enhanced_metadata['llm_tickers'] = [trade['ticker'] for trade in llm_parse_result.trades]
-                    enhanced_metadata['llm_actions'] = [trade['action'] for trade in llm_parse_result.trades]
-            
-            # Create enhanced alert object with LLM metadata
-            from ..core.models import Alert
-            enhanced_alert = Alert(
-                source=alert.source,
-                content=alert.content,
-                timestamp=alert.timestamp,
-                metadata=enhanced_metadata
-            )
-            
-            sheets_logger.log_email_alert(
-                alert=enhanced_alert,
-                raw_data=alert_data,
-                whitelist_status=whitelist_status,
-                processing_status=processing_status,
-                error_message=error_message
-            )
+            logger.warning(f"⚠️ Trade alert processing completed with status: {context.processing_status}")
+            if context.error_message:
+                logger.warning(f"Error: {context.error_message}")
         
     except Exception as e:
-        error_msg = f"Error processing trade alert: {e}"
-        logger.error(f"❌ {error_msg}")
-        
-        # Log the error
-        if sheets_logger:
-            sheets_logger.log_email_alert(
-                alert=alert,
-                raw_data=alert_data,
-                whitelist_status=whitelist_status,
-                processing_status="error",
-                error_message=error_msg
-            )
+        logger.error(f"❌ Pipeline processing failed: {e}")
+
 
 @app.post("/webhook/gmail")
-async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
+async def gmail_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pipeline: ProcessingPipeline = Depends(get_processing_pipeline)
+):
     """
-    Gmail Pub/Sub webhook endpoint
+    Gmail Pub/Sub webhook endpoint - Service Layer Architecture
     
-    This endpoint receives push notifications from Google Cloud Pub/Sub
-    when new emails arrive in the monitored Gmail account.
+    Clean implementation using dependency injection and pipeline processing
     """
-    data = None
-    message_id = "unknown"
-    
     try:
         # Get request data
         data = await request.json()
         
         logger.info("📧 Received Gmail Pub/Sub notification")
-        logger.info(f"Pub/Sub data: {json.dumps(data, indent=2)}")
         
         # Validate Pub/Sub message format
         if "message" not in data:
-            # Log the failed message immediately
-            if sheets_logger:
-                sheets_logger.log_email_alert(
-                    alert=None,
-                    raw_data=data,
-                    whitelist_status="unknown",
-                    processing_status="error",
-                    error_message="Invalid Pub/Sub message format"
-                )
             raise HTTPException(status_code=400, detail="Invalid Pub/Sub message format")
         
         message = data["message"]
@@ -452,73 +246,41 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
         
         logger.info(f"📨 Message ID: {message_id}, Published: {publish_time}")
         
-        # LOG IMMEDIATELY - This ensures we capture every message regardless of processing outcome
-        if sheets_logger:
-            sheets_logger.log_email_alert(
-                alert=None,
-                raw_data=data,
-                whitelist_status="pending_validation",
-                processing_status="received",
-                error_message=None
-            )
-        
-        # Validate that we have required components
-        if not gmail_provider:
-            if sheets_logger:
-                sheets_logger.log_email_alert(
-                    alert=None,
-                    raw_data=data,
-                    whitelist_status="unknown",
-                    processing_status="error",
-                    error_message="Gmail provider not initialized"
-                )
-            logger.error("❌ Gmail provider not initialized")
-            raise HTTPException(status_code=500, detail="Gmail provider not initialized")
-        
-        # Add to background processing queue
-        background_tasks.add_task(process_trade_alert, data)
+        # Process with pipeline in background
+        background_tasks.add_task(process_trade_alert_pipeline, data, pipeline)
         
         # Return success response to Pub/Sub
         return {
             "status": "success",
-            "message": "Gmail notification received and queued for processing",
+            "message": "Gmail notification received and queued for pipeline processing",
             "messageId": message_id,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "architecture": "service_layer"
         }
         
     except json.JSONDecodeError:
-        # Log JSON decode error
-        if sheets_logger:
-            sheets_logger.log_email_alert(
-                alert=None,
-                raw_data={"error": "Invalid JSON in request body"},
-                whitelist_status="unknown",
-                processing_status="error", 
-                error_message="Invalid JSON in request body"
-            )
         logger.error("❌ Invalid JSON in request body")
         raise HTTPException(status_code=400, detail="Invalid JSON")
     
     except Exception as e:
-        # Log any other errors
-        if sheets_logger:
-            sheets_logger.log_email_alert(
-                alert=None,
-                raw_data=data or {"error": "No data available"},
-                whitelist_status="unknown",
-                processing_status="error",
-                error_message=str(e)
-            )
         logger.error(f"❌ Error processing Gmail webhook: {e}")
         # Return 200 to acknowledge message and prevent retries for permanent failures
-        # Only return 500 for truly retryable errors (network issues, temporary failures)
         return JSONResponse(
-            status_code=200, 
-            content={"status": "error", "message": f"Processed with error: {str(e)}"}
+            status_code=200,
+            content={
+                "status": "error",
+                "message": f"Processed with error: {str(e)}",
+                "architecture": "service_layer"
+            }
         )
 
+
 @app.post("/manual-trade")
-async def manual_trade(request: Request, background_tasks: BackgroundTasks):
+async def manual_trade(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pipeline: ProcessingPipeline = Depends(get_processing_pipeline)
+):
     """
     Manual trade submission endpoint for testing
     """
@@ -527,7 +289,7 @@ async def manual_trade(request: Request, background_tasks: BackgroundTasks):
         
         logger.info("🧪 Received manual trade request")
         
-        # Create a mock Pub/Sub message format
+        # Create mock Pub/Sub message format
         mock_pubsub_data = {
             "message": {
                 "data": data.get("data", ""),
@@ -539,18 +301,20 @@ async def manual_trade(request: Request, background_tasks: BackgroundTasks):
             }
         }
         
-        # Process as background task
-        background_tasks.add_task(process_trade_alert, mock_pubsub_data)
+        # Process with pipeline
+        background_tasks.add_task(process_trade_alert_pipeline, mock_pubsub_data, pipeline)
         
         return {
-            "status": "success", 
-            "message": "Manual trade queued for processing",
-            "timestamp": datetime.utcnow().isoformat()
+            "status": "success",
+            "message": "Manual trade queued for pipeline processing",
+            "timestamp": datetime.utcnow().isoformat(),
+            "architecture": "service_layer"
         }
         
     except Exception as e:
         logger.error(f"❌ Error processing manual trade: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: HTTPException):
@@ -559,9 +323,11 @@ async def not_found_handler(request: Request, exc: HTTPException):
         content={
             "error": "Not Found",
             "message": f"Endpoint {request.url.path} not found",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "architecture": "service_layer"
         }
     )
+
 
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc: HTTPException):
@@ -570,9 +336,11 @@ async def internal_error_handler(request: Request, exc: HTTPException):
         content={
             "error": "Internal Server Error",
             "message": "An unexpected error occurred",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "architecture": "service_layer"
         }
     )
+
 
 def run_server():
     """Run the webhook server"""
@@ -584,6 +352,7 @@ def run_server():
         reload=DEBUG,
         log_level="info" if not DEBUG else "debug"
     )
+
 
 if __name__ == "__main__":
     run_server()

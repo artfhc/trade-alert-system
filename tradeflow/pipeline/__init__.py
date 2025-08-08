@@ -13,7 +13,7 @@ from .handlers import (
     LLMAnalysisHandler,
     LoggingHandler
 )
-from .pipeline import ProcessingPipeline
+from .pipeline import ProcessingPipeline, create_default_pipeline
 
 __all__ = [
     'ProcessingContext',
@@ -22,5 +22,6 @@ __all__ = [
     'ValidateWhitelistHandler',
     'LLMAnalysisHandler', 
     'LoggingHandler',
-    'ProcessingPipeline'
+    'ProcessingPipeline',
+    'create_default_pipeline'
 ]
