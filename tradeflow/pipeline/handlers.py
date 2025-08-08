@@ -227,25 +227,59 @@ class LoggingHandler(Handler):
     """
     Log processing results to Google Sheets
     
-    Replaces the dual logging logic from the monolithic function
+    Replaces the dual logging logic from the monolithic function.
+    This handler should always run, even if previous handlers failed.
     """
     
+    def handle(self, context: ProcessingContext) -> ProcessingContext:
+        """
+        Override base handler to ensure logging never fails the pipeline
+        
+        The LoggingHandler is special - it should always complete successfully
+        and log whatever information is available, even if previous handlers failed.
+        """
+        handler_name = self.__class__.__name__
+        context.start_handler(handler_name)
+        
+        try:
+            logger.info(f"🔄 Processing with {handler_name}")
+            
+            # Execute logging logic - always try to log regardless of previous errors
+            self.process(context)
+            
+            # Mark handler as completed
+            context.mark_handler_complete(handler_name)
+            logger.info(f"✅ {handler_name} completed successfully")
+            
+        except Exception as e:
+            # Log the error but don't fail the pipeline
+            logger.error(f"❌ {handler_name} encountered error: {str(e)}")
+            logger.info("📊 Continuing pipeline despite logging error")
+            # Don't call context.set_error() - we want logging to be non-blocking
+        
+        # Always continue to next handler (there shouldn't be any after logging)
+        return self.handle_next(context)
+    
     def process(self, context: ProcessingContext) -> None:
-        if not context.alert:
-            raise ValueError("No alert available for logging")
-        
-        # Log to main trade log
-        self._log_to_sheets(context)
-        
-        # Log to LLM parsing log if LLM analysis was performed
-        if context.llm_parse_result is not None or context.llm_provider != "none":
-            self._log_to_llm_sheets(context)
-        
-        # Mark processing as completed
-        if not context.has_error():
-            context.processing_status = "completed"
-        
-        logger.info("📊 Logging completed successfully")
+        # Always try to log, even if earlier handlers failed
+        try:
+            # Log to main trade log
+            self._log_to_sheets(context)
+            
+            # Log to LLM parsing log if LLM analysis was performed
+            if context.llm_parse_result is not None or context.llm_provider != "none":
+                self._log_to_llm_sheets(context)
+            
+            # Mark processing as completed only if no errors
+            if not context.has_error():
+                context.processing_status = "completed"
+            
+            logger.info("📊 Logging completed successfully")
+            
+        except Exception as e:
+            # Log the logging error but don't fail the entire pipeline
+            logger.error(f"📊 Logging failed: {e}")
+            # Don't raise the exception - we want to complete processing
     
     def _log_to_sheets(self, context: ProcessingContext) -> None:
         """Log to main Google Sheets trade log"""
@@ -255,8 +289,23 @@ class LoggingHandler(Handler):
             logger.warning("⚠️ Google Sheets logger not available")
             return
         
-        # Create enhanced alert with LLM metadata
-        enhanced_alert = self._create_enhanced_alert(context)
+        # Create enhanced alert with LLM metadata (handle case where alert is None)
+        if context.alert:
+            enhanced_alert = self._create_enhanced_alert(context)
+        else:
+            # Create a minimal alert for logging failures
+            from datetime import datetime
+            from ..core.models import Alert
+            enhanced_alert = Alert(
+                source="gmail",
+                content="Failed to parse email content",
+                timestamp=datetime.utcnow(),
+                metadata={
+                    'message_id': context.message_id,
+                    'sender': context.sender,
+                    'error': 'Alert parsing failed'
+                }
+            )
         
         sheets_logger.log_email_alert(
             alert=enhanced_alert,
@@ -276,8 +325,11 @@ class LoggingHandler(Handler):
             logger.warning("⚠️ LLM logger not available")
             return
         
+        # Use the alert if available, otherwise use None (LLM logger should handle this)
+        alert_for_logging = context.alert if context.alert else None
+        
         llm_logger.log_llm_parsing_result(
-            alert=context.alert,
+            alert=alert_for_logging,
             llm_parse_result=context.llm_parse_result,
             llm_provider=context.llm_provider,
             processing_time_ms=context.processing_time_ms,
