@@ -51,10 +51,25 @@ class ProcessingPipeline:
             timestamp=datetime.utcnow()
         )
         
-        logger.info(f"🚀 Starting pipeline processing for message: {context.raw_data.get('message', {}).get('messageId', 'unknown')}")
+        # Log detailed input information
+        logger.info(f"🚀 Starting pipeline processing")
+        logger.info(f"📥 Raw data type: {type(raw_data)}")
+        logger.info(f"📥 Raw data keys: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not a dict'}")
+        
+        # Log raw data structure (safely)
+        try:
+            import json
+            raw_data_preview = json.dumps(raw_data, indent=2)[:500]
+            logger.info(f"📥 Raw data preview: {raw_data_preview}...")
+        except Exception as e:
+            logger.info(f"📥 Raw data preview failed: {e}, data: {str(raw_data)[:200]}")
+        
+        message_id = context.raw_data.get('message', {}).get('messageId', 'unknown')
+        logger.info(f"📧 Processing message ID: {message_id}")
         
         # Execute pipeline
         try:
+            logger.info("🔄 Starting pipeline execution through handler chain")
             result_context = self._pipeline_handler.handle(context)
             
             # Log completion

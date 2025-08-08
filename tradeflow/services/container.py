@@ -100,10 +100,13 @@ class ServiceContainer:
         
         Useful for optional services that may not be configured
         """
+        logger.info(f"🔍 [ServiceContainer] Attempting to get optional service: {service_name}")
         try:
-            return self.get(service_name)
+            service = self.get(service_name)
+            logger.info(f"✅ [ServiceContainer] Successfully got service: {service_name}")
+            return service
         except (KeyError, RuntimeError) as e:
-            logger.debug(f"Optional service {service_name} not available: {e}")
+            logger.info(f"⚠️ [ServiceContainer] Optional service {service_name} not available: {e}")
             return None
     
     def is_registered(self, service_name: str) -> bool:

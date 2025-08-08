@@ -202,21 +202,27 @@ async def process_trade_alert_pipeline(
     with clean pipeline processing.
     """
     try:
-        logger.info("🔄 Processing trade alert with pipeline architecture")
+        logger.info("🔄 [WebServer] Processing trade alert with pipeline architecture")
+        logger.info(f"🔍 [WebServer] Raw data type: {type(raw_data)}")
+        logger.info(f"🔍 [WebServer] Raw data preview: {str(raw_data)[:300]}...")
         
         # Process through pipeline
+        logger.info("🔄 [WebServer] Calling pipeline.process()")
         context = await pipeline.process(raw_data)
+        logger.info(f"🔄 [WebServer] Pipeline.process() returned with status: {context.processing_status}")
         
         # Log final result
         if context.is_successful():
-            logger.info("✅ Trade alert processed successfully")
+            logger.info("✅ [WebServer] Trade alert processed successfully")
         else:
-            logger.warning(f"⚠️ Trade alert processing completed with status: {context.processing_status}")
+            logger.warning(f"⚠️ [WebServer] Trade alert processing completed with status: {context.processing_status}")
             if context.error_message:
-                logger.warning(f"Error: {context.error_message}")
+                logger.warning(f"[WebServer] Error: {context.error_message}")
         
     except Exception as e:
-        logger.error(f"❌ Pipeline processing failed: {e}")
+        logger.error(f"❌ [WebServer] Pipeline processing failed: {e}")
+        import traceback
+        logger.error(f"❌ [WebServer] Stack trace: {traceback.format_exc()}")
 
 
 @app.post("/webhook/gmail")

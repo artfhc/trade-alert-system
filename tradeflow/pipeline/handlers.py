@@ -44,26 +44,33 @@ class Handler(ABC):
         handler_name = self.__class__.__name__
         context.start_handler(handler_name)
         
+        logger.info(f"🔄 [{handler_name}] Starting processing")
+        logger.info(f"🔍 [{handler_name}] Context state - Status: {context.processing_status}, Error: {context.error_message is not None}")
+        logger.info(f"🔍 [{handler_name}] Should continue: {context.should_continue_processing()}")
+        
         try:
-            logger.info(f"🔄 Processing with {handler_name}")
-            
             # Skip processing if context has errors or should not continue
             if not context.should_continue_processing():
-                logger.info(f"⏭️  Skipping {handler_name} - processing stopped")
+                logger.info(f"⏭️  [{handler_name}] Skipping - processing stopped (status: {context.processing_status})")
                 return self.handle_next(context)
+            
+            logger.info(f"▶️  [{handler_name}] Executing handler-specific logic")
             
             # Execute handler-specific logic
             self.process(context)
             
             # Mark handler as completed
             context.mark_handler_complete(handler_name)
-            logger.info(f"✅ {handler_name} completed successfully")
+            logger.info(f"✅ [{handler_name}] completed successfully")
             
         except Exception as e:
             error_message = f"{handler_name} failed: {str(e)}"
             context.set_error(error_message, "error")
-            logger.error(f"❌ {error_message}")
+            logger.error(f"❌ [{handler_name}] {error_message}")
+            import traceback
+            logger.error(f"❌ [{handler_name}] Stack trace: {traceback.format_exc()}")
         
+        logger.info(f"➡️  [{handler_name}] Passing to next handler")
         # Continue to next handler
         return self.handle_next(context)
     
@@ -74,9 +81,14 @@ class Handler(ABC):
     
     def handle_next(self, context: ProcessingContext) -> ProcessingContext:
         """Pass context to next handler if available"""
+        current_handler = self.__class__.__name__
         if self._next_handler:
+            next_handler = self._next_handler.__class__.__name__
+            logger.info(f"🔗 [{current_handler}] Passing control to {next_handler}")
             return self._next_handler.handle(context)
-        return context
+        else:
+            logger.info(f"🏁 [{current_handler}] End of pipeline - no next handler")
+            return context
 
 
 class ParseAlertHandler(Handler):
@@ -87,15 +99,24 @@ class ParseAlertHandler(Handler):
     """
     
     def process(self, context: ProcessingContext) -> None:
+        logger.info("🔍 [ParseAlertHandler] Checking for Gmail provider")
         gmail_provider = self.container.get_optional("gmail_provider")
         
         if not gmail_provider:
             # Gmail provider not available - try to extract basic info from Pub/Sub message
-            logger.warning("⚠️ Gmail provider not available - attempting basic Pub/Sub parsing")
+            logger.warning("⚠️ [ParseAlertHandler] Gmail provider not available - attempting basic Pub/Sub parsing")
+            logger.info(f"🔍 [ParseAlertHandler] Raw data type: {type(context.raw_data)}")
+            logger.info(f"🔍 [ParseAlertHandler] Raw data keys: {list(context.raw_data.keys()) if isinstance(context.raw_data, dict) else 'Not a dict'}")
+            
             alert = self._parse_pubsub_message_basic(context.raw_data)
+            logger.info("✅ [ParseAlertHandler] Basic Pub/Sub parsing completed")
         else:
             # Use Gmail provider for full parsing
+            logger.info("📧 [ParseAlertHandler] Using Gmail provider for full parsing")
             alert = gmail_provider.parse_alert(context.raw_data)
+            logger.info("✅ [ParseAlertHandler] Gmail provider parsing completed")
+        
+        logger.info(f"🔍 [ParseAlertHandler] Alert created - Source: {alert.source}, Content length: {len(alert.content)}")
         
         # Update context
         context.alert = alert
@@ -104,8 +125,10 @@ class ParseAlertHandler(Handler):
         context.metadata = alert.metadata
         context.processing_status = "parsed"
         
-        logger.info(f"📧 Alert parsed from {context.sender}")
-        logger.info(f"📝 Content preview: {alert.content[:100]}...")
+        logger.info(f"📧 [ParseAlertHandler] Alert parsed from {context.sender}")
+        logger.info(f"📧 [ParseAlertHandler] Message ID: {context.message_id}")
+        logger.info(f"📝 [ParseAlertHandler] Content preview: {alert.content[:100]}...")
+        logger.info(f"🔍 [ParseAlertHandler] Context updated - Status: {context.processing_status}")
     
     def _parse_pubsub_message_basic(self, raw_data: dict) -> 'Alert':
         """
@@ -265,18 +288,26 @@ class LLMAnalysisHandler(Handler):
     """
     
     def process(self, context: ProcessingContext) -> None:
+        logger.info("🔍 [LLMAnalysisHandler] Starting LLM analysis")
+        
         if not context.alert:
+            logger.error("❌ [LLMAnalysisHandler] No alert available for LLM analysis")
             raise ValueError("No alert available for LLM analysis")
+        
+        logger.info(f"✅ [LLMAnalysisHandler] Alert available - Content length: {len(context.alert.content)}")
+        logger.info(f"🔍 [LLMAnalysisHandler] Checking for email parser")
         
         email_parser = self.container.get_optional("email_parser")
         
         if not email_parser:
             context.processing_status = "llm_not_available"
             context.llm_provider = "not_available"
-            logger.warning("⚠️ Email LLM Parser not available - skipping LLM analysis")
+            logger.warning("⚠️ [LLMAnalysisHandler] Email LLM Parser not available - skipping LLM analysis")
+            logger.info("📊 [LLMAnalysisHandler] Analysis skipped due to missing parser")
             return
         
-        logger.info("🧠 Processing email with LLM Parser")
+        logger.info("🧠 [LLMAnalysisHandler] Email parser available - processing email with LLM Parser")
+        logger.info(f"📝 [LLMAnalysisHandler] Email content to analyze: {context.alert.content[:200]}...")
         
         # Track processing time
         start_time = time.time()
@@ -359,22 +390,30 @@ class LoggingHandler(Handler):
         handler_name = self.__class__.__name__
         context.start_handler(handler_name)
         
+        logger.info(f"🔄 [LoggingHandler] Starting logging (ALWAYS RUNS)")
+        logger.info(f"🔍 [LoggingHandler] Context state - Status: {context.processing_status}, Error: {context.error_message is not None}")
+        logger.info(f"🔍 [LoggingHandler] Alert available: {context.alert is not None}")
+        logger.info(f"🔍 [LoggingHandler] LLM result available: {context.llm_parse_result is not None}")
+        
         try:
-            logger.info(f"🔄 Processing with {handler_name}")
+            logger.info(f"▶️  [LoggingHandler] Executing logging logic")
             
             # Execute logging logic - always try to log regardless of previous errors
             self.process(context)
             
             # Mark handler as completed
             context.mark_handler_complete(handler_name)
-            logger.info(f"✅ {handler_name} completed successfully")
+            logger.info(f"✅ [LoggingHandler] completed successfully")
             
         except Exception as e:
             # Log the error but don't fail the pipeline
-            logger.error(f"❌ {handler_name} encountered error: {str(e)}")
-            logger.info("📊 Continuing pipeline despite logging error")
+            logger.error(f"❌ [LoggingHandler] encountered error: {str(e)}")
+            import traceback
+            logger.error(f"❌ [LoggingHandler] Stack trace: {traceback.format_exc()}")
+            logger.info("📊 [LoggingHandler] Continuing pipeline despite logging error")
             # Don't call context.set_error() - we want logging to be non-blocking
         
+        logger.info(f"➡️  [LoggingHandler] Completed (no next handler)")
         # Always continue to next handler (there shouldn't be any after logging)
         return self.handle_next(context)
     
