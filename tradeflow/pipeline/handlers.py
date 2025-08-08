@@ -120,6 +120,10 @@ class ParseAlertHandler(Handler):
         
         # Update context
         context.alert = alert
+        
+        logger.info(f"🔍 [ParseAlertHandler] Alert metadata keys: {list(alert.metadata.keys())}")
+        logger.info(f"🔍 [ParseAlertHandler] Alert metadata: {alert.metadata}")
+        
         context.message_id = alert.metadata.get('message_id', 'unknown')
         context.sender = alert.metadata.get('sender', 'unknown')
         context.metadata = alert.metadata
@@ -129,6 +133,14 @@ class ParseAlertHandler(Handler):
         logger.info(f"📧 [ParseAlertHandler] Message ID: {context.message_id}")
         logger.info(f"📝 [ParseAlertHandler] Content preview: {alert.content[:100]}...")
         logger.info(f"🔍 [ParseAlertHandler] Context updated - Status: {context.processing_status}")
+        
+        # Double check the message ID issue
+        if context.message_id == 'unknown':
+            logger.error(f"❌ [ParseAlertHandler] Message ID is 'unknown' - this indicates a parsing issue!")
+            logger.error(f"❌ [ParseAlertHandler] Available metadata keys: {list(alert.metadata.keys())}")
+            logger.error(f"❌ [ParseAlertHandler] Full metadata: {alert.metadata}")
+        else:
+            logger.info(f"✅ [ParseAlertHandler] Message ID successfully extracted: {context.message_id}")
     
     def _parse_pubsub_message_basic(self, raw_data: dict) -> 'Alert':
         """
@@ -153,6 +165,25 @@ class ParseAlertHandler(Handler):
         
         message_id = message.get('messageId', f'pubsub_{int(datetime.utcnow().timestamp())}')
         publish_time = message.get('publishTime', datetime.utcnow().isoformat())
+        
+        logger.info(f"🔍 [_parse_pubsub_message_basic] Extracted messageId: {message_id}")
+        logger.info(f"🔍 [_parse_pubsub_message_basic] Message keys: {list(message.keys()) if message else 'No message'}")
+        logger.info(f"🔍 [_parse_pubsub_message_basic] Raw data structure: {raw_data}")
+        
+        # If messageId is still the default, let's try other possible locations
+        if message_id.startswith('pubsub_'):
+            # Try alternative locations for message ID
+            alternative_id = (
+                raw_data.get('messageId') or 
+                raw_data.get('message_id') or
+                message.get('message_id') or
+                message.get('id') or
+                message.get('attributes', {}).get('messageId') or
+                message.get('attributes', {}).get('message_id')
+            )
+            if alternative_id:
+                logger.info(f"🔍 [_parse_pubsub_message_basic] Found alternative message ID: {alternative_id}")
+                message_id = alternative_id
         
         # Try to decode the base64 data - with multiple fallback strategies
         email_content = "No email content available"
