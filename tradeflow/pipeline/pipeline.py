@@ -70,6 +70,8 @@ class ProcessingPipeline:
         # Execute pipeline
         try:
             logger.info("🔄 Starting pipeline execution through handler chain")
+            logger.info(f"🔍 First handler to be called: {self._pipeline_handler.__class__.__name__}")
+            logger.info(f"🔍 First handler's next: {self._pipeline_handler._next_handler.__class__.__name__ if self._pipeline_handler._next_handler else 'None'}")
             result_context = self._pipeline_handler.handle(context)
             
             # Log completion
@@ -96,16 +98,29 @@ class ProcessingPipeline:
         
         Creates the chain: Parse → Validate → LLMAnalysis → Logging
         """
-        logger.info("Building processing pipeline")
+        logger.info("🔧 Building processing pipeline")
         
-        # Create handler chain using method chaining
-        pipeline = (ParseAlertHandler(self.container)
-                   .set_next(ValidateWhitelistHandler(self.container))
-                   .set_next(LLMAnalysisHandler(self.container))
-                   .set_next(LoggingHandler(self.container)))
+        # Create handlers individually for debugging
+        parse_handler = ParseAlertHandler(self.container)
+        validate_handler = ValidateWhitelistHandler(self.container)
+        llm_handler = LLMAnalysisHandler(self.container)
+        logging_handler = LoggingHandler(self.container)
         
-        logger.info("Processing pipeline built: ParseAlert → ValidateWhitelist → LLMAnalysis → Logging")
-        return pipeline
+        logger.info(f"🔧 Created handlers: {parse_handler.__class__.__name__}, {validate_handler.__class__.__name__}, {llm_handler.__class__.__name__}, {logging_handler.__class__.__name__}")
+        
+        # Build chain step by step for debugging
+        parse_handler.set_next(validate_handler)
+        validate_handler.set_next(llm_handler)
+        llm_handler.set_next(logging_handler)
+        
+        logger.info(f"🔧 Chain built - First handler: {parse_handler.__class__.__name__}")
+        logger.info(f"🔧 First handler's next: {parse_handler._next_handler.__class__.__name__ if parse_handler._next_handler else 'None'}")
+        logger.info(f"🔧 Second handler's next: {validate_handler._next_handler.__class__.__name__ if validate_handler._next_handler else 'None'}")
+        logger.info(f"🔧 Third handler's next: {llm_handler._next_handler.__class__.__name__ if llm_handler._next_handler else 'None'}")
+        logger.info(f"🔧 Last handler's next: {logging_handler._next_handler.__class__.__name__ if logging_handler._next_handler else 'None'}")
+        
+        logger.info("✅ Processing pipeline built: ParseAlert → ValidateWhitelist → LLMAnalysis → Logging")
+        return parse_handler
     
     def _log_processing_summary(self, context: ProcessingContext) -> None:
         """Log summary of processing results"""

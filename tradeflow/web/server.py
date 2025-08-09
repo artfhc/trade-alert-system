@@ -81,6 +81,13 @@ async def startup_event():
         processing_pipeline = create_default_pipeline(service_container)
         logger.info("✅ Processing pipeline initialized")
         
+        # Debug: Verify pipeline construction
+        logger.info(f"🔍 [Startup] Pipeline first handler: {processing_pipeline._pipeline_handler.__class__.__name__}")
+        if hasattr(processing_pipeline._pipeline_handler, '_next_handler') and processing_pipeline._pipeline_handler._next_handler:
+            logger.info(f"🔍 [Startup] Pipeline second handler: {processing_pipeline._pipeline_handler._next_handler.__class__.__name__}")
+        else:
+            logger.error("❌ [Startup] Pipeline chain appears to be broken - no next handler!")
+        
         logger.info("🎯 Server startup completed successfully")
         
     except Exception as e:
