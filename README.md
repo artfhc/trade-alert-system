@@ -1,214 +1,285 @@
-# 📈 Trade Alert → Execution Flow (v2: Pluggable + Reactive)
+# 📈 Trade Alert Processing System (v0.0.8) ✅
+
+**STATUS: CORE SYSTEM OPERATIONAL** - Email processing, LLM parsing, and logging fully implemented
 
 ---
 
-## 📝 1. Product Requirements Document (PRD)
+## 📝 Current System Overview
 
-### 💡 One-Sentence Summary
-An automated, pluggable trading system that reacts to trade alerts from email (via Gmail Pub/Sub), extracts actionable details using LLMs, executes orders through Alpaca, and logs every action to Google Sheets.
+### 💡 What's Working Now
+A robust email alert processing system that receives Gmail alerts via Pub/Sub, extracts trade signals using LLMs (OpenAI/Anthropic), validates sender whitelists, and logs all activity to Google Sheets with comprehensive error handling.
 
 ---
 
-### 👣 User Flow
-1. A new trade alert is pushed to the system (via Gmail Pub/Sub)
-2. The alert is parsed and normalized by an abstract `AlertProvider`
-3. A `Trade ID` is created and a "pending" record is logged
-4. LLM extracts trade details (ticker, action, sizing) from email content
-5. System calculates the position size using Alpaca account balance
-6. Market order is placed via Alpaca API
-7. Result (success, fail, or pending) is logged as a new row in Google Sheets
-8. LLM generates a user-friendly error message if the trade fails
+### ✅ **IMPLEMENTED FEATURES**
+
+1. **Gmail Pub/Sub Integration** - Receives trade alerts in real-time
+2. **Service Layer Architecture** - Clean dependency injection with health monitoring
+3. **LLM-Powered Email Parsing** - Dual API support (OpenAI/Anthropic) with fallback
+4. **Domain/Sender Whitelisting** - Security validation for trusted sources
+5. **Dual Google Sheets Logging** - Separate logs for valid alerts and all email processing
+6. **Robust Pipeline Processing** - Chain of responsibility pattern with error handling
+7. **Comprehensive Error Handling** - Detailed logging and graceful failure modes
+8. **RESTful API** - FastAPI server with health checks and manual testing endpoints
+
+---
+
+### ⏳ **PLANNED FEATURES** 
+
+1. **Alpaca Broker Integration** - Live trade execution (API ready, integration pending)
+2. **Position Sizing Logic** - Risk-based trade sizing calculations
+3. **Trade Execution Pipeline** - Order placement and monitoring
+4. **Risk Management** - Portfolio limits and safety checks
+5. **Web Dashboard** - Real-time monitoring and manual override UI
 
 ---
 
 ### 🎯 Target Audience
-- Algorithmic traders or builders following structured alert feeds
-- Developers exploring LLM automation
-- Internal tools team building reactive trading bots
+- Algorithmic traders processing structured email alerts
+- Developers building LLM-powered automation systems
+- Trading teams requiring audit trails and monitoring
 
 ---
 
-### 🔧 Core Features
-- **Pluggable alert ingestion** via `AlertProvider` abstraction
-- Reactive trigger from Gmail → Pub/Sub → Webhook
-- LLM-based parsing for email content
-- Trade sizing logic + execution via Alpaca
-- Append-only event stream logging to Google Sheets
-- LLM-generated explanations on failure
+### 🔧 Current Architecture Features
+- **Service Layer Architecture** with dependency injection
+- **Pipeline Processing** replacing monolithic functions
+- **Dual LLM Support** (OpenAI + Anthropic) with automatic fallback
+- **Comprehensive Health Monitoring** for all services
+- **Background Task Processing** for non-blocking email handling
+- **Structured Logging** with detailed processing context
 
 ---
 
-### 🛠️ Stack / Tools
-- **Python** (core orchestrator)
-- **Gmail API + Google Pub/Sub** (email trigger)
-- **Alpaca API** (market order execution)
-- **OpenAI / Claude API** (LLM parsing & summarization)
-- **gspread** (Google Sheets integration)
-- **Render / Railway / VPS** (hosting)
-- **Flask / FastAPI** (webhook endpoint)
+### 🛠️ Technology Stack
+- **Python 3.8+** with FastAPI framework
+- **Gmail API + Google Pub/Sub** for email triggers
+- **OpenAI/Anthropic APIs** for LLM processing
+- **Google Sheets API** via gspread for logging
+- **Uvicorn** ASGI server
+- **Render.com** hosting (production ready)
 
 ---
 
-### 🧠 Optional Enhancements
-- Add new `AlertProvider`s: Discord, Telegram, RSS, Manual UI
-- Retry logic, trade queue, alert deduplication
-- Supabase or Postgres DB for long-term state
+## 🧱 Current Architecture (Service Layer Design)
 
----
-
-## 🧱 2. Architecture Overview
-
+**Processing Pipeline** (Implemented ✅)
 ```
-[ Gmail (Pub/Sub) ]
-        |
-        v
-[ Webhook Receiver (FastAPI) ]
-        |
-        v
-[ AlertProvider (GmailPubSubProvider) ]
-        |
-        v
-[ AlertHandler → TradeFlow(alert) ]
-        |
-        v
- ┌────────────────────────────────────────────┐
- │ TradeFlow Orchestration:                   │
- │  • LLM parses email                        │
- │  • Extract trade details & sizing          │
- │  • Compute quantity                        │
- │  • Execute via Alpaca                      │
- │  • Log to Google Sheet                     │
- │  • Generate error explanation (if needed)  │
- └────────────────────────────────────────────┘
+[ Gmail Alert ] → [ Google Pub/Sub ] → [ FastAPI Webhook ]
+                                              |
+                                              v
+                      [ Service Container (Dependency Injection) ]
+                                              |
+                                              v
+        ┌─────────────────────────────────────────────────────────┐
+        │            PROCESSING PIPELINE                          │
+        │                                                         │
+        │  ParseAlert → ValidateWhitelist → LLMAnalysis → Logging │
+        │      |              |                |           |     │
+        │   Parse Pub/Sub   Check sender    Extract        Dual  │
+        │   message data    whitelist      trade signals   Sheet │
+        │   structure       validation     (OpenAI/Claude) logs  │
+        └─────────────────────────────────────────────────────────┘
 ```
 
+**Planned Trading Extension** (Next Phase ⏳)
+```
+                              [ Current Pipeline ]
+                                       |
+                                       v
+        ┌─────────────────────────────────────────────────────────┐
+        │               TRADING EXTENSION                         │
+        │                                                         │
+        │    CalculatePosition → ExecuteTrade → MonitorOrder      │
+        │          |                 |             |             │
+        │    Risk-based sizing    Alpaca API    Order status     │
+        │    Portfolio limits     execution     tracking         │
+        └─────────────────────────────────────────────────────────┘
+```
+
 ---
 
-## 💾 Data Model Summary (Google Sheets)
+## 💾 Current Logging System (Google Sheets)
 
-| Field         | Example                  |
-|---------------|--------------------------|
-| `Trade ID`    | `email-20250802-001`     |
-| `Source`      | `gmail`                  |
-| `Ticker`      | `COIN`                   |
-| `Action`      | `Buy`                    |
-| `Sizing`      | `5%`                     |
-| `Status`      | `pending` / `success` / `fail` |
-| `Order ID`    | Alpaca order ref         |
-| `Message`     | “Executed” / error info  |
-| `Timestamp`   | UTC datetime             |
+**Dual Sheet Architecture:**
+- **Main Alert Log**: Valid trade alerts with LLM analysis
+- **Email Processing Log**: All emails with sender validation status
+
+| Field | Example | Status |
+|-------|---------|--------|
+| `Message ID` | `pubsub-123456789` | ✅ Implemented |
+| `Timestamp` | `2025-01-09 14:30:00` | ✅ Implemented |
+| `Sender` | `alerts@tradingservice.com` | ✅ Implemented |
+| `Subject` | `TRADE ALERT: Buy AAPL` | ✅ Implemented |
+| `Whitelist Status` | `allowed` / `blocked` | ✅ Implemented |
+| `LLM Provider` | `openai` / `anthropic` | ✅ Implemented |
+| `Is Trading Alert` | `True` / `False` | ✅ Implemented |
+| `Trade Count` | `1` | ✅ Implemented |
+| `Processing Status` | `completed` / `error` | ✅ Implemented |
+| `Error Message` | Error details if any | ✅ Implemented |
+| **Trade Execution** | **Coming Next** | |
+| `Ticker` | `AAPL` | ⏳ Planned |
+| `Action` | `BUY` / `SELL` | ⏳ Planned |
+| `Quantity` | `100` | ⏳ Planned |
+| `Order ID` | `alpaca-order-123` | ⏳ Planned |
 
 ---
 
-## 📦 Project Structure
+## 📦 Actual Project Structure (Implemented)
 
 ```plaintext
 tradeflow/
-├── main.py                      # Entry point (webhook handler)
-├── config.py                    # Secrets, API keys, constants
-├── requirements.txt             # Python dependencies
-├── .env                         # (Optional) local secrets
+├── main.py                      # ✅ Entry point with service architecture
+├── config.py                    # ✅ Configuration and environment vars
+├── version.py                   # ✅ Version management (v0.0.8)
+├── requirements.txt             # ✅ Python dependencies
 │
-├── core/
-│   ├── orchestrator.py          # TradeFlow controller
-│   ├── models.py                # Alert, TradeEvent, enums
-│   └── utils.py                 # Logging, ID generation, helpers
+├── services/                    # ✅ Service layer architecture
+│   ├── config.py                # ✅ Service configuration 
+│   ├── container.py             # ✅ Dependency injection container
+│   └── factories.py             # ✅ Service factory functions
 │
-├── providers/                  # Alert sources (pluggable)
-│   ├── base.py                  # Abstract AlertProvider class
-│   └── gmail_pubsub.py          # Gmail Pub/Sub implementation
+├── pipeline/                    # ✅ Processing pipeline
+│   ├── pipeline.py              # ✅ Main orchestrator
+│   ├── context.py               # ✅ Processing context
+│   └── handlers.py              # ✅ Pipeline handlers (Parse/Validate/LLM/Log)
 │
-├── parsers/
-│   └── email_llm.py             # LLM-based email parser
+├── providers/                   # ✅ Alert sources (pluggable)
+│   ├── base.py                  # ✅ Abstract AlertProvider
+│   └── gmail_pubsub.py          # ✅ Gmail Pub/Sub implementation
 │
-├── broker/                     # Trading and brokerage integration
-│   ├── alpaca_client.py         # Alpaca SDK wrapper
-│   └── sizing.py                # Position size calculator
+├── parsers/                     # ✅ LLM parsing
+│   ├── email_llm.py             # ✅ OpenAI/Anthropic email parser
+│   └── extract_trade_prompt.yaml # ✅ LLM prompt template
 │
-├── logging/
-│   └── google_sheets.py         # GSpread logic for appending logs
+├── logging/                     # ✅ Logging system
+│   └── google_sheets.py         # ✅ Dual sheet logging
 │
-├── llm/
-│   └── explain_failure.py       # Optional: LLM-generated error summaries
+├── web/                         # ✅ Web server
+│   └── server.py                # ✅ FastAPI server with health checks
 │
-├── web/
-│   └── server.py                # FastAPI or Flask webhook server
+├── broker/                      # ⏳ Ready for implementation
+│   ├── alpaca_client.py         # ⏳ Alpaca integration skeleton
+│   └── sizing.py                # ⏳ Position sizing logic
 │
-└── tests/
-    └── test_tradeflow.py        # Unit tests, mocks, etc.
+├── core/                        # ✅ Core utilities
+│   ├── models.py                # ✅ Data models and enums
+│   └── utils.py                 # ✅ Utility functions
+│
+├── llm/                         # ✅ LLM utilities
+│   └── explain_failure.py       # ✅ Error explanation
+│
+└── tests/                       # ✅ Comprehensive test suite
+    ├── unit/                    # ✅ Unit tests for each component
+    └── integration/             # ✅ Pipeline integration tests
 ```
 ---
 
-## 🚀 Deployment Overview
+## 🚀 Quick Start & Deployment
 
-### ✅ Components to Deploy
+### ⚡ Current System Status
+**✅ PRODUCTION READY** for email processing and logging
+- Real-time Gmail alert processing
+- LLM-powered trade signal extraction  
+- Comprehensive logging and monitoring
+- Robust error handling and recovery
 
-| Component              | Type           | Hosting Option         |
-|------------------------|----------------|-------------------------|
-| **Webhook Server**     | FastAPI/Flask  | Render / Railway / VPS |
-| **Trade Orchestrator** | Python service | Same as above          |
-| **Google Sheets Writer** | Python module | Embedded in app        |
-| **LLM Calls**          | API (OpenAI, Claude) | Cloud API        |
-| **Gmail Pub/Sub Listener** | Google Infra | Google Cloud Project   |
+### 🛠️ Local Development Setup
 
----
+1. **Clone and Install**
+   ```bash
+   git clone <repository>
+   cd project-trade-alert-system
+   pip install -r tradeflow/requirements.txt
+   ```
 
-### 🛠️ Hosting Stack Option
+2. **Configure Environment**
+   ```bash
+   # Set up Google credentials
+   cp gmail_credentials.json.example gmail_credentials.json  # Add your Gmail API credentials
+   
+   # Set environment variables
+   export OPENAI_API_KEY="your-openai-key"
+   export ANTHROPIC_API_KEY="your-anthropic-key"
+   export GOOGLE_SHEETS_MAIN_ID="your-main-sheet-id"
+   export GOOGLE_SHEETS_EMAIL_LOG_ID="your-email-log-sheet-id"
+   ```
 
-Use **Render.com** (or Railway.app) to host the Python app:
-- Runs the webhook server
-- Processes Gmail Pub/Sub messages
-- Executes trading logic
+3. **Run the Server**
+   ```bash
+   python tradeflow/main.py
+   # Server starts at http://localhost:8000
+   ```
 
----
+4. **Test the API**
+   ```bash
+   # Health check
+   curl http://localhost:8000/health
+   
+   # Service status
+   curl http://localhost:8000/services
+   
+   # API documentation
+   open http://localhost:8000/docs
+   ```
 
-### 📦 Deployment Flow
+### 🌐 Production Deployment (Render.com)
+
+**Current Status**: ✅ DEPLOYED AND OPERATIONAL
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| **FastAPI Server** | ✅ Running | Clean service architecture with health monitoring |
+| **Gmail Pub/Sub** | ✅ Connected | Real-time email processing |
+| **LLM Processing** | ✅ Active | Dual API support (OpenAI/Anthropic) |
+| **Google Sheets** | ✅ Logging | Dual sheet architecture |
+| **Error Handling** | ✅ Robust | Comprehensive logging and recovery |
+
+### 📦 Deployment Architecture
 
 ```text
-[Gmail] ➝ [Google Pub/Sub] ➝ [Webhook on Render (FastAPI)]
-
-Webhook does:
-  • Parse Alert
-  • Run LLM parsing
-  • Call Alpaca
-  • Log to Google Sheets
+[Gmail Alerts] → [Google Pub/Sub] → [Render.com FastAPI Server]
+                                              |
+                                              v
+                      ┌─────────────────────────────────────┐
+                      │     SERVICE LAYER ARCHITECTURE     │
+                      │                                     │
+                      │  ┌─────────────────────────────┐    │
+                      │  │    PROCESSING PIPELINE      │    │
+                      │  │  Parse→Validate→LLM→Log     │    │
+                      │  └─────────────────────────────┘    │
+                      │                                     │
+                      │  ┌─────────────────────────────┐    │
+                      │  │   DEPENDENCY INJECTION      │    │
+                      │  │  Container + Health Checks  │    │
+                      │  └─────────────────────────────┘    │
+                      └─────────────────────────────────────┘
+                                          |
+                                          v
+                           ┌─────────────────────────────┐
+                           │      EXTERNAL SERVICES     │
+                           │  • OpenAI/Anthropic APIs   │
+                           │  • Google Sheets API       │
+                           │  • [Alpaca API - Coming]   │
+                           └─────────────────────────────┘
 ```
 
----
+### 📚 Setup Guides
 
-## 📚 Setup Guides
+**Available Documentation:**
+- **[Gmail Setup Guide](GMAIL_SETUP.md)** - Configure Gmail Pub/Sub (✅ Complete)
+- **[Render Deployment Guide](RENDER_DEPLOYMENT.md)** - Production deployment (✅ Complete)
 
-For detailed setup instructions, see these guides:
+### 🔧 Next Phase: Trading Integration
 
-- **[Gmail Setup Guide](GMAIL_SETUP.md)** - Configure Gmail Pub/Sub integration
-- **[Render Deployment Guide](RENDER_DEPLOYMENT.md)** - Deploy webhook server to Render
+**Ready to implement:**
+1. **Alpaca API Integration** - Live trading execution
+2. **Position Sizing** - Risk-based trade calculations
+3. **Order Management** - Trade monitoring and updates
+4. **Dashboard UI** - Web interface for monitoring
 
----
-
-## 🧭 Service Architecture Diagram
-
-```text
-                +-------------------------+
-                |    Gmail (Trade Alert)  |
-                +-----------+-------------+
-                            |
-                            v
-         +------------------------+
-         |  Google Cloud Pub/Sub  |
-         +-----------+------------+
-                     |
-          HTTP Push  v
-              +------------------------+
-              |  Webhook Server (FastAPI) |
-              |  (Render / Railway)     |
-              +------------+-----------+
-                           |
-                           v
-                +--------------------------+
-                |  TradeFlow Orchestrator  |
-                | - LLM Email Parser       |
-                | - Trade Execution        |
-                | - Alpaca Trade API       |
-                | - Google Sheet Logger    |
-                +--------------------------+
-```
+**Current Foundation Supports:**
+- Pluggable broker integration
+- Extensible pipeline handlers
+- Comprehensive logging for audit trails
+- Health monitoring for all services
